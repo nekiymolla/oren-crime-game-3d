@@ -35,6 +35,16 @@ class _KeyboardControlsState extends State<KeyboardControls>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
 
+  // Клавиатура — не единственный источник ввода (есть ещё джойстик и
+  // кнопки вождения на тач-экране, пишущие в тот же InputState). Если бы
+  // мы безусловно писали (0,0)/false каждый кадр, когда клавиши не зажаты,
+  // это забивало бы тач-ввод 60 раз в секунду сразу после его нажатия.
+  // Поэтому пишем в InputState только пока клавиатура реально активна, плюс
+  // один кадр на отпускание (чтобы честно остановить движение/бег, начатые
+  // именно клавиатурой) — а дальше не трогаем InputState вообще.
+  bool _wasMoving = false;
+  bool _wasRunning = false;
+
   @override
   void initState() {
     super.initState();
@@ -67,8 +77,17 @@ class _KeyboardControlsState extends State<KeyboardControls>
       x /= len;
       y /= len;
     }
-    inputState.setMove(x, y);
-    inputState.isRunning = running;
+
+    final isMoving = x != 0 || y != 0;
+    if (isMoving || _wasMoving) {
+      inputState.setMove(x, y);
+    }
+    _wasMoving = isMoving;
+
+    if (running || _wasRunning) {
+      inputState.isRunning = running;
+    }
+    _wasRunning = running;
   }
 
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
