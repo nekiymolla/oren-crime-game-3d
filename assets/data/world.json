@@ -1,0 +1,16 @@
+{
+  "cityName": "Оренбург",
+  "districtName": "Южный район",
+  "geoOrigin": {
+    "comment": "Точка (0,0,0) локальной игровой системы координат. Все geo-координаты OSM проецируются в метры (ENU) относительно неё при импорте.",
+    "latitude": 51.715510,
+    "longitude": 55.107186
+  },
+  "chunkSizeMeters": 200.0,
+  "streamingRadiusChunks": 2,
+  "playerSpawn": {
+    "positionLocal": [0.0, 0.0, 0.0],
+    "headingDegrees": 0.0,
+    "comment": "Совпадает с geoOrigin — дом игрока, ул. Весенняя, 3"
+  }
+}

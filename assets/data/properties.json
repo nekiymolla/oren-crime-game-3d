@@ -1,0 +1,21 @@
+{
+  "properties": [
+    {
+      "id": "home_player_01",
+      "displayName": "Дом игрока — ул. Весенняя, 3",
+      "geoLocation": {
+        "latitude": 51.715510,
+        "longitude": 55.107186
+      },
+      "positionLocal": [0.0, 0.0, 0.0],
+      "price": 0.0,
+      "owned": true,
+      "hasGarage": true,
+      "garageCapacity": 1,
+      "entryPointLocal": [2.0, 0.0, 1.5],
+      "exitPointLocal": [2.0, 0.0, 3.0],
+      "interiorSceneId": "interior_home_player_01",
+      "isSaveSpot": true
+    }
+  ]
+}

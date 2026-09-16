@@ -1,0 +1,35 @@
+{
+  "vehicles": [
+    {
+      "id": "car_sedan_01",
+      "displayName": "Волга-седан",
+      "modelClass": "sedan",
+      "modelAsset": "assets/models/vehicles/car_sedan_01.glb",
+      "mass": 1450.0,
+      "maxSpeedKmh": 165.0,
+      "acceleration": 8.2,
+      "braking": 10.5,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [3.5, 2.1, 1.4, 1.0, 0.8]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.18
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 1.1
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg"
+    }
+  ]
+}
