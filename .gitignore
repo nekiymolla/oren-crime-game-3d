@@ -46,3 +46,9 @@ app.*.map.json
 
 # FVM Version Cache
 .fvm/
+
+# Инструментарий и сырые данные оффлайн-пайплайна OSM -> 3D (build-time,
+# нужен только при (пере)генерации геометрии района, не часть приложения;
+# setup.sh скачивает osm2world_bin/ заново за секунды)
+tools/osm_pipeline/osm2world_bin/
+tools/osm_pipeline/*.osm

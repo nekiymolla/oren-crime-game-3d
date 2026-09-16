@@ -3,6 +3,7 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../player/player_input_bridge_component.dart';
+import '../world/district.dart';
 import '../world/terrain.dart';
 
 /// Чистый Dart-класс без импорта Flutter — владеет сценой и игровым
@@ -29,9 +30,16 @@ class Game {
   Future<void> load() async {
     await Scene.initializeStaticResources();
 
-    scene.add(buildPlaceholderGround(sizeMeters: groundSizeMeters));
+    // Плейсхолдер-земля чуть ниже нуля — подложка на случай пустых участков
+    // между дорогами/зданиями (osm2world строит поверхности только там, где
+    // OSM что-то размечает; наш Overpass-запрос пока берёт только highway и
+    // building, без landuse/natural).
+    scene.add(buildPlaceholderGround(sizeMeters: groundSizeMeters)
+      ..position = vm.Vector3(0, -0.05, 0));
     scene.add(_buildSun());
     _buildSky();
+
+    scene.add(await loadYuzhnyDistrict());
 
     final movement = ThirdPersonControllerComponent(
       walkSpeed: 4.5,
