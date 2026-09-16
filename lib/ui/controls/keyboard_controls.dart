@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/input/input_state.dart';
@@ -10,9 +11,15 @@ import '../../core/input/input_state.dart';
 /// [InputState], что и тач-джойстик/кнопки — не отдельный путь ввода, а ещё
 /// один источник для того же приёмника (см. InputState).
 ///
-/// Один и тот же WASD работает и пешком, и за рулём — режим определяет, кто
-/// сейчас читает InputState (см. GameModeState), сама клавиатура об этом не
-/// знает.
+/// Удерживаемые клавиши (WASD/Shift) опрашиваются каждый кадр через
+/// [HardwareKeyboard.instance.logicalKeysPressed], а не копятся по
+/// down/up-событиям в onKeyEvent: на части платформ (в т.ч. проброс
+/// клавиатуры хоста в Android-эмулятор) автоповтор зажатой клавиши приходит
+/// как быстрые пары "отпустил-нажал", а не честное "держится" — из-за этого
+/// накопленное по событиям состояние дёргается. Опрос текущего состояния
+/// клавиатуры эту дёрготню убирает. Одноразовые действия (прыжок, посадка в
+/// машину) по-прежнему берутся из onKeyEvent — они и должны срабатывать
+/// один раз на нажатие, а не непрерывно, пока клавиша зажата.
 class KeyboardControls extends StatefulWidget {
   const KeyboardControls({super.key, required this.onInteract, required this.child});
 
@@ -24,50 +31,57 @@ class KeyboardControls extends StatefulWidget {
   State<KeyboardControls> createState() => _KeyboardControlsState();
 }
 
-class _KeyboardControlsState extends State<KeyboardControls> {
-  bool _forward = false;
-  bool _back = false;
-  bool _left = false;
-  bool _right = false;
+class _KeyboardControlsState extends State<KeyboardControls>
+    with SingleTickerProviderStateMixin {
+  late final Ticker _ticker;
 
-  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
-    final key = event.logicalKey;
-    final isDown = event is KeyDownEvent || event is KeyRepeatEvent;
-
-    if (key == LogicalKeyboardKey.keyW || key == LogicalKeyboardKey.arrowUp) {
-      _forward = isDown;
-    } else if (key == LogicalKeyboardKey.keyS || key == LogicalKeyboardKey.arrowDown) {
-      _back = isDown;
-    } else if (key == LogicalKeyboardKey.keyA || key == LogicalKeyboardKey.arrowLeft) {
-      _left = isDown;
-    } else if (key == LogicalKeyboardKey.keyD || key == LogicalKeyboardKey.arrowRight) {
-      _right = isDown;
-    } else if (key == LogicalKeyboardKey.shiftLeft || key == LogicalKeyboardKey.shiftRight) {
-      inputState.isRunning = isDown;
-      return KeyEventResult.handled;
-    } else if (key == LogicalKeyboardKey.space) {
-      if (isDown) inputState.requestJump();
-      return KeyEventResult.handled;
-    } else if (key == LogicalKeyboardKey.keyE) {
-      if (isDown) widget.onInteract();
-      return KeyEventResult.handled;
-    } else {
-      return KeyEventResult.ignored;
-    }
-
-    _recomputeMove();
-    return KeyEventResult.handled;
+  @override
+  void initState() {
+    super.initState();
+    _ticker = createTicker((_) => _pollHeldKeys())..start();
   }
 
-  void _recomputeMove() {
-    var x = (_right ? 1.0 : 0.0) - (_left ? 1.0 : 0.0);
-    var y = (_forward ? 1.0 : 0.0) - (_back ? 1.0 : 0.0);
+  @override
+  void dispose() {
+    _ticker.dispose();
+    super.dispose();
+  }
+
+  void _pollHeldKeys() {
+    final pressed = HardwareKeyboard.instance.logicalKeysPressed;
+    final forward =
+        pressed.contains(LogicalKeyboardKey.keyW) || pressed.contains(LogicalKeyboardKey.arrowUp);
+    final back =
+        pressed.contains(LogicalKeyboardKey.keyS) || pressed.contains(LogicalKeyboardKey.arrowDown);
+    final left =
+        pressed.contains(LogicalKeyboardKey.keyA) || pressed.contains(LogicalKeyboardKey.arrowLeft);
+    final right =
+        pressed.contains(LogicalKeyboardKey.keyD) || pressed.contains(LogicalKeyboardKey.arrowRight);
+    final running = pressed.contains(LogicalKeyboardKey.shiftLeft) ||
+        pressed.contains(LogicalKeyboardKey.shiftRight);
+
+    var x = (right ? 1.0 : 0.0) - (left ? 1.0 : 0.0);
+    var y = (forward ? 1.0 : 0.0) - (back ? 1.0 : 0.0);
     if (x != 0 && y != 0) {
       final len = math.sqrt(x * x + y * y);
       x /= len;
       y /= len;
     }
     inputState.setMove(x, y);
+    inputState.isRunning = running;
+  }
+
+  KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey == LogicalKeyboardKey.space) {
+      inputState.requestJump();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyE) {
+      widget.onInteract();
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   @override
