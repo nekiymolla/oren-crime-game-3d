@@ -70,6 +70,11 @@ class VehicleControllerComponent extends Component {
 
   double get speed => velocityXZ.length;
 
+  /// Курс носа машины (рад), та же конвенция yaw, что и у FollowCameraController
+  /// — используется для авто-довода камеры за машиной, когда игрок не крутит
+  /// вид сам (см. Game.tick).
+  double get heading => _yaw;
+
   /// Насколько текущее движение "не туда, куда смотрит машина" — 0 = едет
   /// строго носом вперёд, ближе к 1 = боком (для UI/звука заноса позже).
   double get driftFactor {

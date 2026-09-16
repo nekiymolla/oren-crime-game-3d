@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter_scene/kit.dart';
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
@@ -34,6 +36,15 @@ class Game {
 
   /// Насколько близко нужно быть к машине, чтобы сесть в неё.
   static const double _vehicleInteractRadius = 4.0;
+
+  /// true, пока игрок сам крутит камеру пальцем (см. GameHud) — авто-довод
+  /// камеры за курсом машины в это время не работает, чтобы не бороться с
+  /// рукой игрока.
+  bool userIsAdjustingCamera = false;
+
+  /// Скорость авто-довода камеры за курсом машины, рад/с на радиан
+  /// расхождения (экспоненциальное сглаживание, не мгновенный доворот).
+  static const double _cameraAutoAlignSpeed = 2.5;
 
   Future<void> load() async {
     await Scene.initializeStaticResources();
@@ -142,5 +153,19 @@ class Game {
 
   /// Общая для всей игры логика тика (таймеры, спавн и т.д.), не привязанная
   /// к одному узлу. Per-node поведение живёт в компонентах, а не здесь.
-  void tick(double deltaSeconds) {}
+  void tick(double deltaSeconds) {
+    if (gameModeState.mode == ControlMode.driving && !userIsAdjustingCamera) {
+      _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
+    }
+  }
+
+  /// Плавно доворачивает орбиту камеры к [targetYaw] по кратчайшей дуге —
+  /// используется, чтобы камера сама возвращалась за спину машины, когда
+  /// игрок не крутит вид сам (см. userIsAdjustingCamera).
+  void _easeCameraYawToward(double targetYaw, double deltaSeconds) {
+    var diff = targetYaw - cameraController.yaw;
+    diff = (diff + math.pi) % (2 * math.pi) - math.pi;
+    final t = 1.0 - math.exp(-_cameraAutoAlignSpeed * deltaSeconds);
+    cameraController.orbitBy(diff * t, 0);
+  }
 }

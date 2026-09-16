@@ -57,10 +57,20 @@ class _GameHudState extends State<GameHud> {
               right: 0,
               top: 0,
               bottom: _controlsStripHeight + bottomInset,
-              child: CameraControls(
-                controller: game.cameraController,
-                autofocus: false,
-                child: const SizedBox.expand(),
+              // Listener — поверх CameraControls, не в конкуренции с ним за
+              // жест (raw pointer, не гео-recognizer): просто отмечает, что
+              // палец сейчас в зоне поворота, чтобы Game.tick не пытался
+              // одновременно довернуть камеру за курсом машины (см.
+              // userIsAdjustingCamera в Game).
+              child: Listener(
+                onPointerDown: (_) => game.userIsAdjustingCamera = true,
+                onPointerUp: (_) => game.userIsAdjustingCamera = false,
+                onPointerCancel: (_) => game.userIsAdjustingCamera = false,
+                child: CameraControls(
+                  controller: game.cameraController,
+                  autofocus: false,
+                  child: const SizedBox.expand(),
+                ),
               ),
             ),
             Positioned(
