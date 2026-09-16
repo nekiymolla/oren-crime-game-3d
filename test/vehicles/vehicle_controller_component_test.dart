@@ -68,4 +68,9 @@ void main() {
 
     expect(controller.speed, closeTo(0.0, 0.01));
   });
+
+  // Столкновения (raycastNode против реальной геометрии стены) юнит-тестом
+  // не проверить headless: CuboidGeometry сразу грузит вершины в GPU при
+  // конструировании (Flutter GPU требует Impeller-контекст), которого нет
+  // в `flutter test`. Эта часть проверяется только вживую в игре.
 }

@@ -25,6 +25,9 @@ class VehicleControllerComponent extends Component {
     this.gripAtLowSpeed = 14.0,
     this.gripAtHighSpeed = 4.0,
     this.driftThresholdSpeed = 9.0,
+    this.bodyHalfWidth = 0.9,
+    this.bodyHalfLength = 2.2,
+    this.collisionProbeHeight = 0.5,
   }) : reverseMaxSpeed = reverseMaxSpeed ?? maxSpeed * 0.35;
 
   /// Максимальная скорость вперёд, м/с.
@@ -60,6 +63,15 @@ class VehicleControllerComponent extends Component {
   /// Скорость, начиная с которой сцепление начинает падать к gripAtHighSpeed.
   double driftThresholdSpeed;
 
+  /// Половина ширины/длины кузова — точки прощупывания препятствий по
+  /// бамперу (3 луча: центр + оба края), чтобы ловить и лобовые, и угловые
+  /// столкновения со зданиями.
+  double bodyHalfWidth;
+  double bodyHalfLength;
+
+  /// Высота лучей столкновений от узла-машины (её origin — уровень земли).
+  double collisionProbeHeight;
+
   /// Скорость машины как вектор в мировых XZ (не всегда совпадает с
   /// направлением носа — расхождение и есть занос).
   vm.Vector2 velocityXZ = vm.Vector2.zero();
@@ -87,6 +99,24 @@ class VehicleControllerComponent extends Component {
   void setInput({required double throttle, required double steer}) {
     _throttleInput = throttle.clamp(-1.0, 1.0);
     _steerInput = steer.clamp(-1.0, 1.0);
+  }
+
+  Node get _rootNode {
+    Node curr = node;
+    while (curr.parent != null) {
+      curr = curr.parent!;
+    }
+    return curr;
+  }
+
+  bool _isExcluded(Node hitNode) {
+    if (hitNode == node) return true;
+    Node? p = hitNode.parent;
+    while (p != null) {
+      if (p == node) return true;
+      p = p.parent;
+    }
+    return false;
   }
 
   @override
@@ -138,9 +168,44 @@ class VehicleControllerComponent extends Component {
     final gripT = 1.0 - math.exp(-grip * dt);
     velocityXZ += (targetVelocity - velocityXZ) * gripT;
 
-    // 4. Применяем смещение и поворот.
+    // 4. Столкновения: щупаем три точки бампера (центр + оба края) вдоль
+    // направления движения и останавливаем машину перед препятствием вместо
+    // проезда сквозь здания.
     final currentPos = (node.globalTransform * vm.Vector4(0, 0, 0, 1)).xyz;
-    final newPos = currentPos + vm.Vector3(velocityXZ.x, 0, velocityXZ.y) * dt;
+    var moveDelta = vm.Vector3(velocityXZ.x, 0, velocityXZ.y) * dt;
+    final moveDist = moveDelta.length;
+    if (moveDist > 1e-5) {
+      final moveDir = moveDelta.normalized();
+      final movingForward = newForward.x * moveDir.x + newForward.y * moveDir.z >= 0;
+      final bumperCenter = newForward * (movingForward ? bodyHalfLength : -bodyHalfLength);
+      final right = vm.Vector2(newForward.y, -newForward.x);
+      final probeHeight = vm.Vector3(0, collisionProbeHeight, 0);
+
+      var closestDistance = moveDist;
+      for (final lateralOffset in [-bodyHalfWidth, 0.0, bodyHalfWidth]) {
+        final probeStart = currentPos +
+            vm.Vector3(bumperCenter.x, 0, bumperCenter.y) +
+            vm.Vector3(right.x, 0, right.y) * lateralOffset +
+            probeHeight;
+        final hit = raycastNode(
+          _rootNode,
+          vm.Ray.originDirection(probeStart, moveDir),
+          maxDistance: moveDist,
+          where: (n) => !_isExcluded(n),
+        );
+        if (hit != null && hit.distance < closestDistance) {
+          closestDistance = hit.distance;
+        }
+      }
+
+      if (closestDistance < moveDist) {
+        moveDelta = moveDir * math.max(0.0, closestDistance - 0.05);
+        velocityXZ = vm.Vector2.zero();
+      }
+    }
+
+    // 5. Применяем смещение и поворот.
+    final newPos = currentPos + moveDelta;
     final groundY = groundPlaneHeight ?? newPos.y;
     final worldPos = vm.Vector3(newPos.x, groundY, newPos.z);
     final worldRot = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), _yaw);

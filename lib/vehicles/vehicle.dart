@@ -6,9 +6,11 @@ import 'package:vector_math/vector_math.dart' as vm;
 import 'vehicle_controller_component.dart';
 import 'vehicle_input_bridge_component.dart';
 
-/// Процедурный плейсхолдер седана (кузов-параллелепипед + 4 цилиндра-колеса)
-/// на время, пока нет настоящей 3D-модели машины. Разгон/торможение/руление
-/// заданы в assets/data/vehicles.json (car_sedan_01) — здесь только геометрия.
+/// Процедурный плейсхолдер седана — низкий кузов + кабина сверху со сдвигом
+/// к корме (силуэт седана, а не сплошной "контейнер") + 4 колеса + фары.
+/// Настоящая 3D-модель — отдельная задача, здесь только геометрия на время
+/// её отсутствия. Разгон/торможение/руление заданы в assets/data/vehicles.json
+/// (car_sedan_01) — здесь только геометрия.
 class BuiltVehicle {
   BuiltVehicle({required this.node, required this.controller});
 
@@ -20,23 +22,59 @@ class BuiltVehicle {
 
 BuiltVehicle buildPlaceholderSedan() {
   const bodyWidth = 1.8;
-  const bodyHeight = 1.3;
+  const chassisHeight = 0.65;
   const bodyLength = 4.4;
+  const cabinHeight = 0.62;
+  const cabinLength = 2.3;
+  const cabinWidth = bodyWidth * 0.86;
+  const cabinZOffset = -0.35; // сдвиг кабины к корме — силуэт седана
   const wheelRadius = 0.33;
   const wheelWidth = 0.22;
 
   final node = Node();
 
-  final bodyMesh = Node(
-    mesh: Mesh(
-      CuboidGeometry(vm.Vector3(bodyWidth, bodyHeight, bodyLength)),
-      PhysicallyBasedMaterial()
-        ..baseColorFactor = vm.Vector4(0.12, 0.32, 0.62, 1.0)
-        ..metallicFactor = 0.6
-        ..roughnessFactor = 0.35,
-    ),
-  )..position = vm.Vector3(0, wheelRadius + bodyHeight / 2, 0);
-  node.add(bodyMesh);
+  final paintMaterial = PhysicallyBasedMaterial()
+    ..baseColorFactor = vm.Vector4(0.12, 0.32, 0.62, 1.0)
+    ..metallicFactor = 0.6
+    ..roughnessFactor = 0.35;
+
+  final chassis = Node(
+    mesh: Mesh(CuboidGeometry(vm.Vector3(bodyWidth, chassisHeight, bodyLength)), paintMaterial),
+  )..position = vm.Vector3(0, wheelRadius + chassisHeight / 2, 0);
+  node.add(chassis);
+
+  final cabinMaterial = PhysicallyBasedMaterial()
+    ..baseColorFactor = vm.Vector4(0.05, 0.06, 0.08, 1.0)
+    ..metallicFactor = 0.1
+    ..roughnessFactor = 0.15;
+  final cabin = Node(
+    mesh: Mesh(CuboidGeometry(vm.Vector3(cabinWidth, cabinHeight, cabinLength)), cabinMaterial),
+  )..position = vm.Vector3(
+      0,
+      wheelRadius + chassisHeight + cabinHeight / 2,
+      cabinZOffset,
+    );
+  node.add(cabin);
+
+  final headlightMaterial = PhysicallyBasedMaterial()
+    ..baseColorFactor = vm.Vector4(1.0, 0.98, 0.85, 1.0)
+    ..emissiveFactor = vm.Vector4(1.0, 0.95, 0.7, 1.0)
+    ..emissiveStrength = 2.0
+    ..roughnessFactor = 0.3;
+  const headlightSize = 0.14;
+  for (final side in [-1, 1]) {
+    final headlight = Node(
+      mesh: Mesh(
+        CuboidGeometry(vm.Vector3(headlightSize, headlightSize, 0.05)),
+        headlightMaterial,
+      ),
+    )..position = vm.Vector3(
+        side * (bodyWidth / 2 - headlightSize),
+        wheelRadius + chassisHeight / 2,
+        bodyLength / 2,
+      );
+    node.add(headlight);
+  }
 
   final wheelMaterial = PhysicallyBasedMaterial()
     ..baseColorFactor = vm.Vector4(0.05, 0.05, 0.05, 1.0)
@@ -70,6 +108,8 @@ BuiltVehicle buildPlaceholderSedan() {
     acceleration: 8.2,
     braking: 10.5,
     groundPlaneHeight: 0.0,
+    bodyHalfWidth: bodyWidth / 2,
+    bodyHalfLength: bodyLength / 2,
   );
   node
     ..addComponent(controller)

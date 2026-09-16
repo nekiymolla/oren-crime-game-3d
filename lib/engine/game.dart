@@ -34,8 +34,9 @@ class Game {
   static const double _playerCapsuleRadius = 0.4;
   static const double _playerCapsuleHeight = 1.2;
 
-  /// Насколько близко нужно быть к машине, чтобы сесть в неё.
-  static const double _vehicleInteractRadius = 4.0;
+  /// Насколько близко нужно быть к машине, чтобы сесть в неё. Публичный —
+  /// GameHud использует то же число, чтобы решать, показывать ли кнопку.
+  static const double vehicleInteractRadius = 4.0;
 
   /// true, пока игрок сам крутит камеру пальцем (см. GameHud) — авто-довод
   /// камеры за курсом машины в это время не работает, чтобы не бороться с
@@ -94,7 +95,7 @@ class Game {
     final vehiclePos = vehicle.node.globalTransform.getTranslation();
     if (gameModeState.mode == ControlMode.onFoot) {
       final playerPos = playerNode.globalTransform.getTranslation();
-      if ((playerPos - vehiclePos).length > _vehicleInteractRadius) return;
+      if ((playerPos - vehiclePos).length > vehicleInteractRadius) return;
       gameModeState.mode = ControlMode.driving;
       _playerMeshNode?.visible = false;
       cameraController.followTarget = vehicle.node;
