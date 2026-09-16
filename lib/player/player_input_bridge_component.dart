@@ -1,6 +1,7 @@
 import 'package:flutter_scene/kit.dart';
 import 'package:flutter_scene/scene.dart';
 
+import '../core/game_mode.dart';
 import '../core/input/input_state.dart';
 
 /// Передаёт команды из [InputState] (не знает о движке) в готовые
@@ -20,6 +21,7 @@ class PlayerInputBridgeComponent extends Component {
 
   @override
   void update(double deltaSeconds) {
+    if (gameModeState.mode != ControlMode.onFoot) return;
     movement.setMoveInput(
       inputState.moveDirection,
       isRunning: inputState.isRunning,

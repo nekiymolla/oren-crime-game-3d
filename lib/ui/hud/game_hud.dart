@@ -3,6 +3,7 @@ import 'package:flutter_scene/scene.dart';
 
 import '../../engine/game.dart';
 import '../../engine/game_view.dart';
+import '../controls/vehicle_button.dart';
 import '../controls/virtual_joystick.dart';
 
 /// Высота нижней полосы с джойстиком/кнопками — под ней CameraControls не
@@ -76,6 +77,11 @@ class _GameHudState extends State<GameHud> {
               right: 24,
               bottom: bottomInset + (isPortrait ? 24 : 16),
               child: const RunButton(),
+            ),
+            Positioned(
+              left: 24,
+              top: MediaQuery.of(context).padding.top + 16,
+              child: VehicleButton(onPressed: game.toggleVehicle),
             ),
           ],
         );

@@ -2,7 +2,9 @@ import 'package:flutter_scene/kit.dart';
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../core/game_mode.dart';
 import '../player/player_input_bridge_component.dart';
+import '../vehicles/vehicle.dart';
 import '../world/district.dart';
 import '../world/terrain.dart';
 
@@ -13,6 +15,9 @@ class Game {
   final Scene scene = Scene();
   late final Node playerNode;
   late final Node cameraNode;
+  late final BuiltVehicle vehicle;
+
+  Node? _playerMeshNode;
 
   /// Публичный, чтобы GameHud мог подключить [CameraControls] — сам
   /// контроллер прикреплён к cameraNode как компонент и двигает камеру
@@ -26,6 +31,9 @@ class Game {
   /// Рост капсулы-плейсхолдера игрока: totalHeight = height + 2*radius.
   static const double _playerCapsuleRadius = 0.4;
   static const double _playerCapsuleHeight = 1.2;
+
+  /// Насколько близко нужно быть к машине, чтобы сесть в неё.
+  static const double _vehicleInteractRadius = 4.0;
 
   Future<void> load() async {
     await Scene.initializeStaticResources();
@@ -50,6 +58,9 @@ class Game {
     playerNode = _buildPlayerNode()..addComponent(movement);
     scene.add(playerNode);
 
+    vehicle = buildPlaceholderSedan()..node.position = vm.Vector3(-3, 0, 2);
+    scene.add(vehicle.node);
+
     cameraNode = Node()..addComponent(CameraComponent(activateOnMount: true));
     cameraController = FollowCameraController(
       followTarget: playerNode,
@@ -63,6 +74,25 @@ class Game {
     // а не "куда сейчас смотрит персонаж") — мосту нужен уже готовый
     // cameraController, поэтому он добавляется последним.
     playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController));
+  }
+
+  /// Сесть в машину / выйти из неё — не даёт сработать, если игрок дальше
+  /// [_vehicleInteractRadius] от машины. Переключает и куда едет камера, и
+  /// откуда читается джойстик (см. [GameModeState]).
+  void toggleVehicle() {
+    final vehiclePos = vehicle.node.globalTransform.getTranslation();
+    if (gameModeState.mode == ControlMode.onFoot) {
+      final playerPos = playerNode.globalTransform.getTranslation();
+      if ((playerPos - vehiclePos).length > _vehicleInteractRadius) return;
+      gameModeState.mode = ControlMode.driving;
+      _playerMeshNode?.visible = false;
+      cameraController.followTarget = vehicle.node;
+    } else {
+      gameModeState.mode = ControlMode.onFoot;
+      playerNode.position = vehiclePos + vm.Vector3(2.2, 0, 0);
+      _playerMeshNode?.visible = true;
+      cameraController.followTarget = playerNode;
+    }
   }
 
   /// Направление, в котором распространяется свет (от солнца к земле).
@@ -106,6 +136,7 @@ class Game {
       ),
     )..position = vm.Vector3(0, totalHeight / 2, 0);
     node.add(meshNode);
+    _playerMeshNode = meshNode;
     return node;
   }
 
