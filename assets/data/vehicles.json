@@ -6,9 +6,9 @@
       "modelClass": "sedan",
       "modelAsset": "assets/models/vehicles/car_sedan_01.glb",
       "mass": 1450.0,
-      "maxSpeedKmh": 165.0,
-      "acceleration": 8.2,
-      "braking": 10.5,
+      "maxSpeedKmh": 200.0,
+      "acceleration": 16.0,
+      "braking": 32.0,
       "engine": {
         "maxTorqueNm": 220.0,
         "maxRpm": 6500.0,

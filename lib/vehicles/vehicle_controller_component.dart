@@ -72,6 +72,13 @@ class VehicleControllerComponent extends Component {
   /// Высота лучей столкновений от узла-машины (её origin — уровень земли).
   double collisionProbeHeight;
 
+  /// Зовётся ровно в момент, когда бампер реально во что-то упёрся (не на
+  /// каждый кадр) — аргумент: скорость машины (м/с) прямо перед остановкой.
+  /// Используется VehicleDamageState (см. vehicle_damage.dart) для накопления
+  /// визуальных повреждений — сама физика столкновений тут ни при чём,
+  /// колбэк просто сообщает наружу, что произошло и насколько сильно.
+  void Function(double impactSpeed)? onCollision;
+
   /// Скорость машины как вектор в мировых XZ (не всегда совпадает с
   /// направлением носа — расхождение и есть занос).
   vm.Vector2 velocityXZ = vm.Vector2.zero();
@@ -199,6 +206,7 @@ class VehicleControllerComponent extends Component {
       }
 
       if (closestDistance < moveDist) {
+        onCollision?.call(speed); // speed — ещё до обнуления velocityXZ ниже
         moveDelta = moveDir * math.max(0.0, closestDistance - 0.05);
         velocityXZ = vm.Vector2.zero();
       }
