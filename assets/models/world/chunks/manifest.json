@@ -2,6 +2,33 @@
   "cellSizeMeters": 200,
   "cells": [
     {
+      "id": "1_0",
+      "file": "district_1_0.glb",
+      "cellX": 1,
+      "cellZ": 0,
+      "centerX": 297.25294494628906,
+      "centerZ": 96.31903457641602,
+      "nodeCount": 90
+    },
+    {
+      "id": "-1_-2",
+      "file": "district_-1_-2.glb",
+      "cellX": -1,
+      "cellZ": -2,
+      "centerX": -99.62874603271484,
+      "centerZ": -295.5804328918457,
+      "nodeCount": 89
+    },
+    {
+      "id": "-2_0",
+      "file": "district_-2_0.glb",
+      "cellX": -2,
+      "cellZ": 0,
+      "centerX": -295.6957473754883,
+      "centerZ": 103.26350212097168,
+      "nodeCount": 57
+    },
+    {
       "id": "1_-2",
       "file": "district_1_-2.glb",
       "cellX": 1,
@@ -9,42 +36,6 @@
       "centerX": 279.14322662353516,
       "centerZ": -294.09888076782227,
       "nodeCount": 33
-    },
-    {
-      "id": "0_0",
-      "file": "district_0_0.glb",
-      "cellX": 0,
-      "cellZ": 0,
-      "centerX": 99.50550079345703,
-      "centerZ": 99.54100036621094,
-      "nodeCount": 76
-    },
-    {
-      "id": "1_2",
-      "file": "district_1_2.glb",
-      "cellX": 1,
-      "cellZ": 2,
-      "centerX": 287.1744155883789,
-      "centerZ": 463.6427536010742,
-      "nodeCount": 20
-    },
-    {
-      "id": "0_-3",
-      "file": "district_0_-3.glb",
-      "cellX": 0,
-      "cellZ": -3,
-      "centerX": 110.91947937011719,
-      "centerZ": -452.8487548828125,
-      "nodeCount": 64
-    },
-    {
-      "id": "-3_1",
-      "file": "district_-3_1.glb",
-      "cellX": -3,
-      "cellZ": 1,
-      "centerX": -488.5737609863281,
-      "centerZ": 304.7327423095703,
-      "nodeCount": 30
     },
     {
       "id": "-2_-1",
@@ -65,13 +56,85 @@
       "nodeCount": 37
     },
     {
-      "id": "-1_-1",
-      "file": "district_-1_-1.glb",
+      "id": "-1_0",
+      "file": "district_-1_0.glb",
       "cellX": -1,
+      "cellZ": 0,
+      "centerX": -87.50648498535156,
+      "centerZ": 98.93249702453613,
+      "nodeCount": 58
+    },
+    {
+      "id": "0_0",
+      "file": "district_0_0.glb",
+      "cellX": 0,
+      "cellZ": 0,
+      "centerX": 99.50550079345703,
+      "centerZ": 99.54100036621094,
+      "nodeCount": 78
+    },
+    {
+      "id": "-3_1",
+      "file": "district_-3_1.glb",
+      "cellX": -3,
+      "cellZ": 1,
+      "centerX": -488.5737609863281,
+      "centerZ": 304.7327423095703,
+      "nodeCount": 30
+    },
+    {
+      "id": "-1_1",
+      "file": "district_-1_1.glb",
+      "cellX": -1,
+      "cellZ": 1,
+      "centerX": -82.91866302490234,
+      "centerZ": 304.3519973754883,
+      "nodeCount": 48
+    },
+    {
+      "id": "-3_-2",
+      "file": "district_-3_-2.glb",
+      "cellX": -3,
+      "cellZ": -2,
+      "centerX": -448.91050720214844,
+      "centerZ": -285.3657531738281,
+      "nodeCount": 27
+    },
+    {
+      "id": "0_2",
+      "file": "district_0_2.glb",
+      "cellX": 0,
+      "cellZ": 2,
+      "centerX": 96.3277816772461,
+      "centerZ": 482.3602752685547,
+      "nodeCount": 41
+    },
+    {
+      "id": "-3_-3",
+      "file": "district_-3_-3.glb",
+      "cellX": -3,
+      "cellZ": -3,
+      "centerX": -444.9802551269531,
+      "centerZ": -454.3717498779297,
+      "nodeCount": 17
+    },
+    {
+      "id": "1_1",
+      "file": "district_1_1.glb",
+      "cellX": 1,
+      "cellZ": 1,
+      "centerX": 293.2765121459961,
+      "centerZ": 297.5978775024414,
+      "nodeCount": 53
+    },
+    {
+      "id": "0_-1",
+      "file": "district_0_-1.glb",
+      "cellX": 0,
       "cellZ": -1,
-      "centerX": -86.35298156738281,
-      "centerZ": -100.79248237609863,
-      "nodeCount": 57
+      "centerX": 92.62250518798828,
+      "centerZ": -101.08474540710449,
+      "nodeCount": 115
     },
     {
       "id": "0_1",
@@ -81,6 +144,51 @@
       "centerX": 102.93550109863281,
       "centerZ": 301.60399627685547,
       "nodeCount": 80
+    },
+    {
+      "id": "-1_-1",
+      "file": "district_-1_-1.glb",
+      "cellX": -1,
+      "cellZ": -1,
+      "centerX": -86.35298156738281,
+      "centerZ": -100.79248237609863,
+      "nodeCount": 59
+    },
+    {
+      "id": "-1_2",
+      "file": "district_-1_2.glb",
+      "cellX": -1,
+      "cellZ": 2,
+      "centerX": -90.63802337646484,
+      "centerZ": 480.0802459716797,
+      "nodeCount": 32
+    },
+    {
+      "id": "2_1",
+      "file": "district_2_1.glb",
+      "cellX": 2,
+      "cellZ": 1,
+      "centerX": 459.39027404785156,
+      "centerZ": 282.73462677001953,
+      "nodeCount": 19
+    },
+    {
+      "id": "-3_0",
+      "file": "district_-3_0.glb",
+      "cellX": -3,
+      "cellZ": 0,
+      "centerX": -467.93359375,
+      "centerZ": 98.35324478149414,
+      "nodeCount": 24
+    },
+    {
+      "id": "-1_-3",
+      "file": "district_-1_-3.glb",
+      "cellX": -1,
+      "cellZ": -3,
+      "centerX": -100.82698822021484,
+      "centerZ": -466.39002990722656,
+      "nodeCount": 59
     },
     {
       "id": "0_-2",
@@ -101,31 +209,22 @@
       "nodeCount": 28
     },
     {
-      "id": "-3_-2",
-      "file": "district_-3_-2.glb",
-      "cellX": -3,
-      "cellZ": -2,
-      "centerX": -448.91050720214844,
-      "centerZ": -285.3657531738281,
-      "nodeCount": 27
-    },
-    {
-      "id": "0_-1",
-      "file": "district_0_-1.glb",
-      "cellX": 0,
-      "cellZ": -1,
-      "centerX": 96.56575775146484,
-      "centerZ": -97.84598731994629,
-      "nodeCount": 114
-    },
-    {
-      "id": "1_1",
-      "file": "district_1_1.glb",
+      "id": "1_-1",
+      "file": "district_1_-1.glb",
       "cellX": 1,
-      "cellZ": 1,
-      "centerX": 293.2765121459961,
-      "centerZ": 297.5978775024414,
-      "nodeCount": 51
+      "cellZ": -1,
+      "centerX": 300.9883804321289,
+      "centerZ": -100.97765731811523,
+      "nodeCount": 32
+    },
+    {
+      "id": "0_-3",
+      "file": "district_0_-3.glb",
+      "cellX": 0,
+      "cellZ": -3,
+      "centerX": 110.91947937011719,
+      "centerZ": -452.8487548828125,
+      "nodeCount": 64
     },
     {
       "id": "-2_1",
@@ -137,31 +236,13 @@
       "nodeCount": 74
     },
     {
-      "id": "-1_-2",
-      "file": "district_-1_-2.glb",
-      "cellX": -1,
-      "cellZ": -2,
-      "centerX": -99.62874603271484,
-      "centerZ": -295.5804328918457,
-      "nodeCount": 89
-    },
-    {
-      "id": "-3_-3",
-      "file": "district_-3_-3.glb",
+      "id": "-3_-1",
+      "file": "district_-3_-1.glb",
       "cellX": -3,
-      "cellZ": -3,
-      "centerX": -444.9802551269531,
-      "centerZ": -454.3717498779297,
-      "nodeCount": 17
-    },
-    {
-      "id": "1_0",
-      "file": "district_1_0.glb",
-      "cellX": 1,
-      "cellZ": 0,
-      "centerX": 298.9659423828125,
-      "centerZ": 96.77028465270996,
-      "nodeCount": 89
+      "cellZ": -1,
+      "centerX": -458.32574462890625,
+      "centerZ": -99.82574844360352,
+      "nodeCount": 20
     },
     {
       "id": "-2_2",
@@ -173,40 +254,13 @@
       "nodeCount": 37
     },
     {
-      "id": "-1_-3",
-      "file": "district_-1_-3.glb",
-      "cellX": -1,
-      "cellZ": -3,
-      "centerX": -100.82698822021484,
-      "centerZ": -466.39002990722656,
-      "nodeCount": 59
-    },
-    {
-      "id": "-2_0",
-      "file": "district_-2_0.glb",
-      "cellX": -2,
-      "cellZ": 0,
-      "centerX": -295.6957473754883,
-      "centerZ": 103.26350212097168,
-      "nodeCount": 57
-    },
-    {
-      "id": "-4_-2",
-      "file": "district_-4_-2.glb",
-      "cellX": -4,
-      "cellZ": -2,
-      "centerX": -622.2646484375,
-      "centerZ": -276.8003273010254,
-      "nodeCount": 2
-    },
-    {
-      "id": "-1_0",
-      "file": "district_-1_0.glb",
-      "cellX": -1,
-      "cellZ": 0,
-      "centerX": -87.50648498535156,
-      "centerZ": 98.93249702453613,
-      "nodeCount": 58
+      "id": "2_-1",
+      "file": "district_2_-1.glb",
+      "cellX": 2,
+      "cellZ": -1,
+      "centerX": 438.30709075927734,
+      "centerZ": -106.72034645080566,
+      "nodeCount": 8
     },
     {
       "id": "-3_2",
@@ -218,49 +272,22 @@
       "nodeCount": 15
     },
     {
-      "id": "-1_1",
-      "file": "district_-1_1.glb",
-      "cellX": -1,
-      "cellZ": 1,
-      "centerX": -82.91866302490234,
-      "centerZ": 304.3519973754883,
-      "nodeCount": 48
+      "id": "-2_-2",
+      "file": "district_-2_-2.glb",
+      "cellX": -2,
+      "cellZ": -2,
+      "centerX": -316.85083770751953,
+      "centerZ": -294.8007507324219,
+      "nodeCount": 22
     },
     {
-      "id": "1_-1",
-      "file": "district_1_-1.glb",
+      "id": "1_2",
+      "file": "district_1_2.glb",
       "cellX": 1,
-      "cellZ": -1,
-      "centerX": 300.9883804321289,
-      "centerZ": -100.97765731811523,
-      "nodeCount": 32
-    },
-    {
-      "id": "2_2",
-      "file": "district_2_2.glb",
-      "cellX": 2,
       "cellZ": 2,
-      "centerX": 463.7749328613281,
-      "centerZ": 481.3456573486328,
-      "nodeCount": 11
-    },
-    {
-      "id": "-1_2",
-      "file": "district_-1_2.glb",
-      "cellX": -1,
-      "cellZ": 2,
-      "centerX": -90.63802337646484,
-      "centerZ": 480.0802459716797,
-      "nodeCount": 32
-    },
-    {
-      "id": "0_2",
-      "file": "district_0_2.glb",
-      "cellX": 0,
-      "cellZ": 2,
-      "centerX": 96.3277816772461,
-      "centerZ": 482.3602752685547,
-      "nodeCount": 41
+      "centerX": 287.1744155883789,
+      "centerZ": 463.6427536010742,
+      "nodeCount": 20
     },
     {
       "id": "2_0",
@@ -272,31 +299,22 @@
       "nodeCount": 13
     },
     {
-      "id": "-3_0",
-      "file": "district_-3_0.glb",
-      "cellX": -3,
-      "cellZ": 0,
-      "centerX": -467.93359375,
-      "centerZ": 98.35324478149414,
-      "nodeCount": 24
+      "id": "2_2",
+      "file": "district_2_2.glb",
+      "cellX": 2,
+      "cellZ": 2,
+      "centerX": 463.7749328613281,
+      "centerZ": 481.3456573486328,
+      "nodeCount": 11
     },
     {
-      "id": "-3_-1",
-      "file": "district_-3_-1.glb",
-      "cellX": -3,
-      "cellZ": -1,
-      "centerX": -458.32574462890625,
-      "centerZ": -99.82574844360352,
-      "nodeCount": 20
-    },
-    {
-      "id": "-2_-2",
-      "file": "district_-2_-2.glb",
-      "cellX": -2,
-      "cellZ": -2,
-      "centerX": -316.85083770751953,
-      "centerZ": -294.8007507324219,
-      "nodeCount": 22
+      "id": "3_1",
+      "file": "district_3_1.glb",
+      "cellX": 3,
+      "cellZ": 1,
+      "centerX": 667.2367858886719,
+      "centerZ": 363.6940460205078,
+      "nodeCount": 1
     },
     {
       "id": "2_-2",
@@ -308,6 +326,24 @@
       "nodeCount": 7
     },
     {
+      "id": "3_-3",
+      "file": "district_3_-3.glb",
+      "cellX": 3,
+      "cellZ": -3,
+      "centerX": 665.9430694580078,
+      "centerZ": -459.40476989746094,
+      "nodeCount": 1
+    },
+    {
+      "id": "-4_-2",
+      "file": "district_-4_-2.glb",
+      "cellX": -4,
+      "cellZ": -2,
+      "centerX": -622.2646484375,
+      "centerZ": -276.8003273010254,
+      "nodeCount": 2
+    },
+    {
       "id": "2_-3",
       "file": "district_2_-3.glb",
       "cellX": 2,
@@ -317,48 +353,12 @@
       "nodeCount": 3
     },
     {
-      "id": "2_-1",
-      "file": "district_2_-1.glb",
-      "cellX": 2,
-      "cellZ": -1,
-      "centerX": 438.30709075927734,
-      "centerZ": -106.72034645080566,
-      "nodeCount": 8
-    },
-    {
-      "id": "2_1",
-      "file": "district_2_1.glb",
-      "cellX": 2,
-      "cellZ": 1,
-      "centerX": 459.39027404785156,
-      "centerZ": 282.73462677001953,
-      "nodeCount": 19
-    },
-    {
-      "id": "3_0",
-      "file": "district_3_0.glb",
-      "cellX": 3,
-      "cellZ": 0,
-      "centerX": 642.2518920898438,
-      "centerZ": 8.68625259399414,
-      "nodeCount": 1
-    },
-    {
       "id": "3_-1",
       "file": "district_3_-1.glb",
       "cellX": 3,
       "cellZ": -1,
       "centerX": 652.3505554199219,
       "centerZ": -162.66016387939453,
-      "nodeCount": 1
-    },
-    {
-      "id": "3_-3",
-      "file": "district_3_-3.glb",
-      "cellX": 3,
-      "cellZ": -3,
-      "centerX": 665.9430694580078,
-      "centerZ": -459.40476989746094,
       "nodeCount": 1
     },
     {
@@ -380,12 +380,12 @@
       "nodeCount": 1
     },
     {
-      "id": "3_1",
-      "file": "district_3_1.glb",
+      "id": "3_0",
+      "file": "district_3_0.glb",
       "cellX": 3,
-      "cellZ": 1,
-      "centerX": 667.2367858886719,
-      "centerZ": 363.6940460205078,
+      "cellZ": 0,
+      "centerX": 642.2518920898438,
+      "centerZ": 8.68625259399414,
       "nodeCount": 1
     }
   ]

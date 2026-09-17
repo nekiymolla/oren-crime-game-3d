@@ -12,8 +12,12 @@ CHUNKS_DIR="$OUT_DIR/chunks"
 RAW_FILE="$OUT_DIR/yuzhny_district_raw.glb"
 RECENTERED_FILE="$OUT_DIR/yuzhny_district_recentered.glb"
 JAR="$SCRIPT_DIR/osm2world_bin/OSM2World.jar"
+CALIBRATION_FILE="$SCRIPT_DIR/calibration.json"
 # Должен совпадать по смыслу с chunkSizeMeters в assets/data/world.json.
 CELL_SIZE_METERS=200
+# Совпадает с geoOrigin в assets/data/world.json и fetch_osm_data.sh.
+GEO_ORIGIN_LAT=51.715510
+GEO_ORIGIN_LON=55.107186
 
 if [ ! -f "$INPUT_FILE" ]; then
   echo "Нет $INPUT_FILE — сначала запусти ./fetch_osm_data.sh" >&2
@@ -40,9 +44,12 @@ java -jar "$JAR" convert -i "$INPUT_FILE" -o "$RAW_FILE" --lod 2 \
   --config "$SCRIPT_DIR/osm2world_bin/standard.properties"
 
 # osm2world сам выбирает локальный (0,0,0) по разбросу узлов файла — сдвигает
-# его обратно так, чтобы geoOrigin (маячок из add_anchor_node.py) оказался
+# его обратно так, чтобы geoOrigin (маячки из add_anchor_node.py) оказался
 # ровно в (0,0), иначе спавн игрока не совпадает с домом (см. PROGRESS.md).
-node "$SCRIPT_DIR/recenter.mjs" "$RAW_FILE" "$RECENTERED_FILE"
+# Заодно пишет calibration.json — по нему build_road_graph.mjs проецирует
+# дорожный граф в ту же систему координат, не гоняя его через osm2world.
+node "$SCRIPT_DIR/recenter.mjs" "$RAW_FILE" "$RECENTERED_FILE" "$CALIBRATION_FILE" \
+  "$GEO_ORIGIN_LAT" "$GEO_ORIGIN_LON"
 rm "$RAW_FILE"
 
 # Реальная площадь района — под два километра в поперечнике, поэтому сырой
@@ -52,5 +59,10 @@ rm "$RAW_FILE"
 rm -rf "$CHUNKS_DIR"
 node "$SCRIPT_DIR/grid_split.mjs" "$RECENTERED_FILE" "$CHUNKS_DIR" "$CELL_SIZE_METERS"
 rm "$RECENTERED_FILE"
+
+# Дорожный граф (highway=* из сырого .osm) для будущих NPC/трафика/полиции
+# (см. PROGRESS.md) — координаты через ту же калибровку, что и геометрия.
+python3 "$SCRIPT_DIR/build_road_graph.py" "$INPUT_FILE" "$CALIBRATION_FILE" \
+  "$SCRIPT_DIR/../../assets/data/road_graph.json"
 
 echo "Готово: $CHUNKS_DIR ($(du -sh "$CHUNKS_DIR" | cut -f1))"

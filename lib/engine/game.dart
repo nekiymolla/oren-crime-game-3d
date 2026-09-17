@@ -9,6 +9,7 @@ import '../player/player_input_bridge_component.dart';
 import '../vehicles/vehicle.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
+import '../world/road_graph.dart';
 import '../world/terrain.dart';
 import '../world/vegetation.dart';
 import '../world/world_config.dart';
@@ -57,8 +58,8 @@ class Game {
 
     // Плейсхолдер-земля чуть ниже нуля — подложка на случай пустых участков
     // между дорогами/зданиями (osm2world строит поверхности только там, где
-    // OSM что-то размечает; наш Overpass-запрос пока берёт только highway и
-    // building, без landuse/natural).
+    // OSM что-то размечает, а разметка реального района местами скудная —
+    // см. PROGRESS.md).
     scene.add(buildPlaceholderGround(sizeMeters: groundSizeMeters)
       ..position = vm.Vector3(0, -0.05, 0));
     scene.add(_buildSun());
@@ -68,6 +69,13 @@ class Game {
     final districtManifest = await loadDistrictManifest();
     final vegetation = VegetationBatch();
     scene.add(vegetation.buildNode());
+
+    // Дорожный граф — пока только отладочная визуализация (жёлтые линии
+    // вдоль дорог), полноценного потребителя (NPC/трафик) ещё нет, см.
+    // PROGRESS.md. Без этого саму топологию было бы не проверить на
+    // устройстве без ручного дебага.
+    final roadGraph = await loadRoadGraph();
+    scene.add(buildRoadGraphDebugNode(roadGraph));
     districtStreamer = DistrictStreamer(
       scene: scene,
       manifest: districtManifest,

@@ -1,21 +1,31 @@
-// Находит маячок-якорь (см. add_anchor_node.py — искусственное "здание" с
-// уникальной высотой ANCHOR_HEIGHT ровно в geoOrigin), вычисляет, куда
-// osm2world поместил эту точку в своей локальной системе координат, и
-// сдвигает ВСЮ геометрию так, чтобы geoOrigin оказался ровно в (0,0) —
-// иначе спавн игрока не совпадает с домом, если узлы за пределами bbox
-// (даже отфильтрованные filter_oversized_ways.py) сместили origin, который
-// osm2world выбирает сам по общему разбросу узлов файла (см. PROGRESS.md).
+// Находит три маячка-якоря (см. add_anchor_node.py — искусственные "здания"
+// с уникальными высотами ровно в geoOrigin/+200м на север/+200м на восток),
+// вычисляет полную афинную калибровку lat/lon -> локальные координаты игры
+// (не только сдвиг, но и фактическое направление/масштаб осей X/Z, как их
+// выбрал osm2world) и:
+//   1) сдвигает ВСЮ геометрию так, чтобы geoOrigin оказался ровно в (0,0);
+//   2) пишет calibration.json — по нему build_road_graph.mjs проецирует
+//      узлы дорожного графа в ТУ ЖЕ систему координат, не прогоняя их
+//      заново через osm2world.
+// Без калибровки узлы за пределами bbox (даже отфильтрованные
+// filter_oversized_ways.py) незаметно смещают origin, который osm2world
+// выбирает сам по общему разбросу узлов файла (см. PROGRESS.md).
 //
 // Вызывается из convert_to_glb.sh сразу после osm2world, до grid_split.mjs.
 //
-// Использование: node recenter.mjs <input.glb> <output.glb>
+// Использование: node recenter.mjs <input.glb> <output.glb> <calibration.json> <originLat> <originLon>
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { prune } from '@gltf-transform/functions';
+import fs from 'fs';
 
-const ANCHOR_HEIGHT_MIN = 10000; // см. ANCHOR_HEIGHT в add_anchor_node.py
+// См. ANCHORS в add_anchor_node.py.
+const ANCHOR_HEIGHTS = { origin: 12345, north: 23456, east: 34567 };
+const ANCHOR_OFFSET_METERS = 200.0; // см. ANCHOR_OFFSET_METERS в add_anchor_node.py
 
-const [, , srcPath, outPath] = process.argv;
+const [, , srcPath, outPath, calibrationPath, originLatArg, originLonArg] = process.argv;
+const originLat = Number(originLatArg);
+const originLon = Number(originLonArg);
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 const doc = await io.read(srcPath);
@@ -28,57 +38,85 @@ function collectMeshNodes(node, out) {
 const meshNodes = [];
 for (const child of scene.listChildren()) collectMeshNodes(child, meshNodes);
 
-let anchorNode = null;
-let anchorMinX = Infinity, anchorMaxX = -Infinity;
-let anchorMinZ = Infinity, anchorMaxZ = -Infinity;
-
+// Находим для каждой высоты-маркера её узел и центроид XZ.
+const found = {}; // name -> { node, x, z }
 for (const node of meshNodes) {
   const mesh = node.getMesh();
   for (const prim of mesh.listPrimitives()) {
     const posAccessor = prim.getAttribute('POSITION');
     if (!posAccessor) continue;
     const arr = posAccessor.getArray();
-    let hasAnchorHeight = false;
-    for (let i = 1; i < arr.length; i += 3) {
-      if (arr[i] >= ANCHOR_HEIGHT_MIN) {
-        hasAnchorHeight = true;
-        break;
+    let maxY = -Infinity;
+    for (let i = 1; i < arr.length; i += 3) maxY = Math.max(maxY, arr[i]);
+
+    for (const [name, height] of Object.entries(ANCHOR_HEIGHTS)) {
+      if (Math.abs(maxY - height) > 1) continue;
+      let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+      for (let i = 0; i < arr.length; i += 3) {
+        minX = Math.min(minX, arr[i]);
+        maxX = Math.max(maxX, arr[i]);
+        minZ = Math.min(minZ, arr[i + 2]);
+        maxZ = Math.max(maxZ, arr[i + 2]);
       }
-    }
-    if (!hasAnchorHeight) continue;
-    anchorNode = node;
-    for (let i = 0; i < arr.length; i += 3) {
-      anchorMinX = Math.min(anchorMinX, arr[i]);
-      anchorMaxX = Math.max(anchorMaxX, arr[i]);
-      anchorMinZ = Math.min(anchorMinZ, arr[i + 2]);
-      anchorMaxZ = Math.max(anchorMaxZ, arr[i + 2]);
+      found[name] = { node, x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 };
     }
   }
 }
 
-if (!anchorNode) {
+const missing = Object.keys(ANCHOR_HEIGHTS).filter((name) => !found[name]);
+if (missing.length > 0) {
   console.error(
-    'Маячок-якорь не найден в сконвертированной геометрии (искали вершину ' +
-      `с Y >= ${ANCHOR_HEIGHT_MIN}) — recenter пропущен, geoOrigin может не ` +
-      'совпадать с (0,0). Проверь add_anchor_node.py и что osm2world не ' +
-      'обрезал искусственное здание.',
+    `Маячки не найдены: ${missing.join(', ')} — recenter пропущен, geoOrigin ` +
+      'может не совпадать с (0,0), калибровка дорожного графа недоступна. ' +
+      'Проверь add_anchor_node.py и что osm2world не обрезал искусственные здания.',
   );
   await io.write(outPath, doc);
   process.exit(1);
 }
 
-const offsetX = (anchorMinX + anchorMaxX) / 2;
-const offsetZ = (anchorMinZ + anchorMaxZ) / 2;
-console.log(`Якорь найден на (${offsetX.toFixed(2)}, ${offsetZ.toFixed(2)}) — сдвигаю геометрию.`);
+const origin = found.origin;
+console.log(`Якорь найден на (${origin.x.toFixed(2)}, ${origin.z.toFixed(2)}) — сдвигаю геометрию.`);
 
-// Убираем сам маячок — он не часть реального мира.
-anchorNode.getParentNode()?.removeChild(anchorNode);
-anchorNode.dispose();
+// Единичные векторы "метр на север" / "метр на восток" в локальных
+// координатах — эмпирически, без предположений о формуле проекции внутри
+// osm2world (см. заголовок файла).
+const eastUnit = {
+  x: (found.east.x - origin.x) / ANCHOR_OFFSET_METERS,
+  z: (found.east.z - origin.z) / ANCHOR_OFFSET_METERS,
+};
+const northUnit = {
+  x: (found.north.x - origin.x) / ANCHOR_OFFSET_METERS,
+  z: (found.north.z - origin.z) / ANCHOR_OFFSET_METERS,
+};
+
+fs.writeFileSync(
+  calibrationPath,
+  JSON.stringify(
+    {
+      originLat,
+      originLon,
+      metersPerDegreeLat: 111320.0,
+      metersPerDegreeLon: 111320.0 * Math.cos((originLat * Math.PI) / 180),
+      eastUnit,
+      northUnit,
+    },
+    null,
+    2,
+  ),
+);
+console.log(`Калибровка записана: ${calibrationPath}`);
+
+// Убираем сами маячки — они не часть реального мира.
+for (const { node } of Object.values(found)) {
+  node.getParentNode()?.removeChild(node);
+  node.dispose();
+}
 
 // Сдвигаем все оставшиеся позиции (X/Z; Y — высота — не трогаем).
+const anchorNodes = new Set(Object.values(found).map((a) => a.node));
 const seen = new Set();
 for (const node of meshNodes) {
-  if (node === anchorNode) continue;
+  if (anchorNodes.has(node)) continue;
   const mesh = node.getMesh();
   if (!mesh) continue; // мог быть только что удалённый якорь
   for (const prim of mesh.listPrimitives()) {
@@ -87,8 +125,8 @@ for (const node of meshNodes) {
     seen.add(posAccessor);
     const arr = posAccessor.getArray();
     for (let i = 0; i < arr.length; i += 3) {
-      arr[i] -= offsetX;
-      arr[i + 2] -= offsetZ;
+      arr[i] -= origin.x;
+      arr[i + 2] -= origin.z;
     }
     posAccessor.setArray(arr);
   }
