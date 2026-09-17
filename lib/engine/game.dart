@@ -112,6 +112,20 @@ class Game {
       ..node.position = worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
     scene.add(vehicle.node);
 
+    // Пара припаркованных машин для разнообразия ("больше машин", см.
+    // PROGRESS.md) — чисто декоративные (buildStaticVehicleVisual, без
+    // VehicleControllerComponent/повреждений), трафик-AI отдельная задача.
+    scene.add(
+      buildStaticVehicleVisual(VehicleArchetype.hatchback)
+        ..position = worldConfig.playerSpawnPosition + vm.Vector3(-6, 0, -3)
+        ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.pi * 0.15),
+    );
+    scene.add(
+      buildStaticVehicleVisual(VehicleArchetype.pickup)
+        ..position = worldConfig.playerSpawnPosition + vm.Vector3(-8, 0, 6)
+        ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4),
+    );
+
     cameraNode = Node()..addComponent(CameraComponent(activateOnMount: true));
     cameraController = FollowCameraController(
       followTarget: playerNode,

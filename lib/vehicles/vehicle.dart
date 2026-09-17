@@ -7,11 +7,93 @@ import 'vehicle_controller_component.dart';
 import 'vehicle_damage.dart';
 import 'vehicle_input_bridge_component.dart';
 
-/// Процедурный плейсхолдер седана — низкий кузов + кабина сверху со сдвигом
-/// к корме (силуэт седана, а не сплошной "контейнер") + 4 колеса + фары.
-/// Настоящая 3D-модель — отдельная задача, здесь только геометрия на время
-/// её отсутствия. Разгон/торможение/руление заданы в assets/data/vehicles.json
-/// (car_sedan_01) — здесь только геометрия.
+/// Габариты одного силуэта машины — общие для всех архетипов
+/// (см. [VehicleArchetype]), чтобы не дублировать сборку кузова/колёс на
+/// каждый новый тип. [cargoBedLength] > 0 достраивает открытый кузов
+/// пикапа позади кабины (см. [_buildBodyVariant]).
+class VehicleDimensions {
+  VehicleDimensions({
+    required this.bodyWidth,
+    required this.chassisHeight,
+    required this.bodyLength,
+    required this.cabinHeight,
+    required this.cabinLength,
+    required this.cabinWidth,
+    required this.cabinZOffset,
+    required this.wheelRadius,
+    required this.wheelWidth,
+    this.cargoBedLength = 0.0,
+    required this.paintColor,
+  });
+
+  final double bodyWidth;
+  final double chassisHeight;
+  final double bodyLength;
+  final double cabinHeight;
+  final double cabinLength;
+  final double cabinWidth;
+
+  /// Смещение кабины по Z от центра кузова — отрицательное к корме
+  /// (силуэт седана/хэтчбека), положительное к носу (пикап — кабина
+  /// впереди, кузов сзади).
+  final double cabinZOffset;
+  final double wheelRadius;
+  final double wheelWidth;
+  final double cargoBedLength;
+  final vm.Vector4 paintColor;
+}
+
+/// Готовые силуэты — три разных типа машины на одной и той же процедурной
+/// сборке (см. [VehicleDimensions]), а не три отдельных куска кода.
+class VehicleArchetype {
+  static final sedan = VehicleDimensions(
+    bodyWidth: 1.8,
+    chassisHeight: 0.65,
+    bodyLength: 4.4,
+    cabinHeight: 0.62,
+    cabinLength: 2.3,
+    cabinWidth: 1.8 * 0.86,
+    cabinZOffset: -0.35, // сдвиг кабины к корме — силуэт седана
+    wheelRadius: 0.33,
+    wheelWidth: 0.22,
+    paintColor: vm.Vector4(0.12, 0.32, 0.62, 1.0), // синий
+  );
+
+  static final hatchback = VehicleDimensions(
+    bodyWidth: 1.6,
+    chassisHeight: 0.55,
+    bodyLength: 3.4, // короче седана — компактный городской силуэт
+    cabinHeight: 0.6,
+    cabinLength: 2.1, // кабина занимает почти весь кузов, багажника почти нет
+    cabinWidth: 1.6 * 0.85,
+    cabinZOffset: -0.15,
+    wheelRadius: 0.30,
+    wheelWidth: 0.20,
+    paintColor: vm.Vector4(0.75, 0.15, 0.12, 1.0), // красный
+  );
+
+  static final pickup = VehicleDimensions(
+    bodyWidth: 1.9,
+    chassisHeight: 0.75,
+    bodyLength: 5.2, // длиннее седана — под кабину + грузовой отсек
+    cabinHeight: 0.65,
+    cabinLength: 1.6,
+    cabinWidth: 1.9 * 0.85,
+    cabinZOffset: 1.5, // кабина у носа, кузов — вся корма
+    wheelRadius: 0.36,
+    wheelWidth: 0.24,
+    cargoBedLength: 2.5,
+    paintColor: vm.Vector4(0.35, 0.36, 0.34, 1.0), // защитный хаки
+  );
+}
+
+/// Процедурный плейсхолдер машины — низкий кузов + кабина сверху (сдвиг
+/// кабины и наличие грузового отсека определяются [VehicleDimensions],
+/// см. [VehicleArchetype] для готовых силуэтов) + 4 колеса + фары.
+/// Настоящие 3D-модели — отдельная задача, здесь только геометрия на время
+/// их отсутствия. Разгон/торможение/руление заданы в assets/data/vehicles.json
+/// (car_sedan_01, но код его пока не читает, числа синхронизированы вручную
+/// — см. PROGRESS.md) — здесь только геометрия.
 ///
 /// Три визуальных состояния кузова (см. [DamageLevel]) — не настоящая
 /// деформация, а переключение видимости между тремя заранее построенными
@@ -51,69 +133,27 @@ class BuiltVehicle {
   }
 }
 
-BuiltVehicle buildPlaceholderSedan() {
-  const bodyWidth = 1.8;
-  const chassisHeight = 0.65;
-  const bodyLength = 4.4;
-  const cabinHeight = 0.62;
-  const cabinLength = 2.3;
-  const cabinWidth = bodyWidth * 0.86;
-  const cabinZOffset = -0.35; // сдвиг кабины к корме — силуэт седана
-  const wheelRadius = 0.33;
-  const wheelWidth = 0.22;
+BuiltVehicle buildPlaceholderSedan() => buildVehicle(VehicleArchetype.sedan);
 
+/// Собирает управляемую машину — с контроллером вождения и системой
+/// повреждений (см. [BuiltVehicle]). Для декоративных припаркованных машин
+/// без физики/повреждений см. [buildStaticVehicleVisual].
+BuiltVehicle buildVehicle(VehicleDimensions dims) {
   final node = Node();
 
   final bodyVariants = {
-    for (final level in DamageLevel.values)
-      level: _buildBodyVariant(
-        level,
-        bodyWidth: bodyWidth,
-        chassisHeight: chassisHeight,
-        bodyLength: bodyLength,
-        cabinHeight: cabinHeight,
-        cabinLength: cabinLength,
-        cabinWidth: cabinWidth,
-        cabinZOffset: cabinZOffset,
-        wheelRadius: wheelRadius,
-      ),
+    for (final level in DamageLevel.values) level: _buildBodyVariant(level, dims),
   };
   bodyVariants.values.forEach(node.add);
-
-  final wheelMaterial = PhysicallyBasedMaterial()
-    ..baseColorFactor = vm.Vector4(0.05, 0.05, 0.05, 1.0)
-    ..roughnessFactor = 0.9;
-  final wheelRotation = vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), math.pi / 2);
-
-  final wheelOffsets = [
-    vm.Vector3(bodyWidth / 2, wheelRadius, bodyLength / 2 - wheelRadius * 1.4),
-    vm.Vector3(-bodyWidth / 2, wheelRadius, bodyLength / 2 - wheelRadius * 1.4),
-    vm.Vector3(bodyWidth / 2, wheelRadius, -bodyLength / 2 + wheelRadius * 1.4),
-    vm.Vector3(-bodyWidth / 2, wheelRadius, -bodyLength / 2 + wheelRadius * 1.4),
-  ];
-  for (final offset in wheelOffsets) {
-    final wheel = Node(
-      mesh: Mesh(
-        CylinderGeometry(
-          bottomRadius: wheelRadius,
-          topRadius: wheelRadius,
-          height: wheelWidth,
-        ),
-        wheelMaterial,
-      ),
-    )
-      ..position = offset
-      ..rotation = wheelRotation;
-    node.add(wheel);
-  }
+  _addWheels(node, dims);
 
   final controller = VehicleControllerComponent(
     maxSpeed: 55.6, // 200 км/ч — быстрее прежних 165 (см. PROGRESS.md)
     acceleration: 16.0, // было 8.2 — разгон ощущался вялым
     braking: 32.0, // было 10.5 — торможение тянулось неприлично долго
     groundPlaneHeight: 0.0,
-    bodyHalfWidth: bodyWidth / 2,
-    bodyHalfLength: bodyLength / 2,
+    bodyHalfWidth: dims.bodyWidth / 2,
+    bodyHalfLength: dims.bodyLength / 2,
   );
   node
     ..addComponent(controller)
@@ -127,24 +167,57 @@ BuiltVehicle buildPlaceholderSedan() {
   );
 }
 
-/// Кузов+кабина+фары под один [DamageLevel]. Колёса не варьируются —
-/// одинаковые для всех уровней, строятся отдельно в [buildPlaceholderSedan].
-Node _buildBodyVariant(
-  DamageLevel level, {
-  required double bodyWidth,
-  required double chassisHeight,
-  required double bodyLength,
-  required double cabinHeight,
-  required double cabinLength,
-  required double cabinWidth,
-  required double cabinZOffset,
-  required double wheelRadius,
-}) {
+/// Чисто декоративная машина (без контроллера/повреждений) — для "фонового"
+/// транспорта, припаркованного вдоль улиц (см. Game.load()). Всегда в
+/// исходном (pristine) виде — повреждать её нечем, раз она не участвует в
+/// столкновениях.
+Node buildStaticVehicleVisual(VehicleDimensions dims) {
+  final node = _buildBodyVariant(DamageLevel.pristine, dims);
+  _addWheels(node, dims);
+  return node;
+}
+
+void _addWheels(Node node, VehicleDimensions dims) {
+  final wheelMaterial = PhysicallyBasedMaterial()
+    ..baseColorFactor = vm.Vector4(0.05, 0.05, 0.05, 1.0)
+    ..roughnessFactor = 0.9;
+  final wheelRotation = vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), math.pi / 2);
+
+  final wheelOffsets = [
+    vm.Vector3(dims.bodyWidth / 2, dims.wheelRadius, dims.bodyLength / 2 - dims.wheelRadius * 1.4),
+    vm.Vector3(-dims.bodyWidth / 2, dims.wheelRadius, dims.bodyLength / 2 - dims.wheelRadius * 1.4),
+    vm.Vector3(dims.bodyWidth / 2, dims.wheelRadius, -dims.bodyLength / 2 + dims.wheelRadius * 1.4),
+    vm.Vector3(-dims.bodyWidth / 2, dims.wheelRadius, -dims.bodyLength / 2 + dims.wheelRadius * 1.4),
+  ];
+  for (final offset in wheelOffsets) {
+    final wheel = Node(
+      mesh: Mesh(
+        CylinderGeometry(bottomRadius: dims.wheelRadius, topRadius: dims.wheelRadius, height: dims.wheelWidth),
+        wheelMaterial,
+      ),
+    )
+      ..position = offset
+      ..rotation = wheelRotation;
+    node.add(wheel);
+  }
+}
+
+/// Кузов+кабина+фары(+кузов пикапа) под один [DamageLevel]. Колёса не
+/// варьируются по повреждениям — строятся отдельно в [_addWheels].
+Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
   final variant = Node();
 
+  // У pristine — паспортный цвет архетипа; damaged/wrecked одинаково темнее
+  // и грязнее вне зависимости от исходного цвета — иначе пришлось бы
+  // подбирать "грязную версию" под каждый новый цвет вручную.
   final paintColor = switch (level) {
-    DamageLevel.pristine => vm.Vector4(0.12, 0.32, 0.62, 1.0),
-    DamageLevel.damaged => vm.Vector4(0.10, 0.20, 0.38, 1.0), // помятая, тусклее
+    DamageLevel.pristine => dims.paintColor,
+    DamageLevel.damaged => vm.Vector4(
+      dims.paintColor.x * 0.6,
+      dims.paintColor.y * 0.6,
+      dims.paintColor.z * 0.6,
+      1.0,
+    ),
     DamageLevel.wrecked => vm.Vector4(0.05, 0.05, 0.05, 1.0), // копоть/ржавчина
   };
   final paintMaterial = PhysicallyBasedMaterial()
@@ -157,8 +230,11 @@ Node _buildBodyVariant(
     };
 
   final chassis = Node(
-    mesh: Mesh(CuboidGeometry(vm.Vector3(bodyWidth, chassisHeight, bodyLength)), paintMaterial),
-  )..position = vm.Vector3(0, wheelRadius + chassisHeight / 2, 0);
+    mesh: Mesh(
+      CuboidGeometry(vm.Vector3(dims.bodyWidth, dims.chassisHeight, dims.bodyLength)),
+      paintMaterial,
+    ),
+  )..position = vm.Vector3(0, dims.wheelRadius + dims.chassisHeight / 2, 0);
   variant.add(chassis);
 
   // Кабина: у wrecked стекло-материал светлее и матовее — "разбитое"
@@ -171,13 +247,41 @@ Node _buildBodyVariant(
     ..metallicFactor = 0.1
     ..roughnessFactor = level == DamageLevel.wrecked ? 0.6 : 0.15;
   final cabin = Node(
-    mesh: Mesh(CuboidGeometry(vm.Vector3(cabinWidth, cabinHeight, cabinLength)), cabinMaterial),
+    mesh: Mesh(
+      CuboidGeometry(vm.Vector3(dims.cabinWidth, dims.cabinHeight, dims.cabinLength)),
+      cabinMaterial,
+    ),
   )..position = vm.Vector3(
       0,
-      wheelRadius + chassisHeight + cabinHeight / 2,
-      cabinZOffset,
+      dims.wheelRadius + dims.chassisHeight + dims.cabinHeight / 2,
+      dims.cabinZOffset,
     );
   variant.add(cabin);
+
+  // Грузовой отсек пикапа — открытый низкий кузов позади кабины (только
+  // когда cargoBedLength > 0, см. VehicleArchetype.pickup). Не настоящий
+  // короб со стенками — плоское дно чуть темнее кузова, читается как
+  // "грузовая площадка" в силуэте, не более детально (тот же уровень
+  // условности, что и остальная процедурная геометрия).
+  if (dims.cargoBedLength > 0) {
+    final bedMaterial = PhysicallyBasedMaterial()
+      ..baseColorFactor = vm.Vector4(
+        paintColor.x * 0.7,
+        paintColor.y * 0.7,
+        paintColor.z * 0.7,
+        1.0,
+      )
+      ..metallicFactor = 0.4
+      ..roughnessFactor = 0.6;
+    final bedZ = dims.cabinZOffset - dims.cabinLength / 2 - dims.cargoBedLength / 2;
+    final bed = Node(
+      mesh: Mesh(
+        CuboidGeometry(vm.Vector3(dims.bodyWidth * 0.92, dims.chassisHeight * 0.3, dims.cargoBedLength)),
+        bedMaterial,
+      ),
+    )..position = vm.Vector3(0, dims.wheelRadius + dims.chassisHeight + dims.chassisHeight * 0.15, bedZ);
+    variant.add(bed);
+  }
 
   // Фары: damaged — левая разбита, wrecked — обе.
   final workingHeadlightMaterial = PhysicallyBasedMaterial()
@@ -197,9 +301,9 @@ Node _buildBodyVariant(
         broken ? brokenHeadlightMaterial : workingHeadlightMaterial,
       ),
     )..position = vm.Vector3(
-        side * (bodyWidth / 2 - headlightSize),
-        wheelRadius + chassisHeight / 2,
-        bodyLength / 2,
+        side * (dims.bodyWidth / 2 - headlightSize),
+        dims.wheelRadius + dims.chassisHeight / 2,
+        dims.bodyLength / 2,
       );
     variant.add(headlight);
   }
@@ -214,13 +318,13 @@ Node _buildBodyVariant(
       ..roughnessFactor = 0.95;
     final crumple = Node(
       mesh: Mesh(
-        CuboidGeometry(vm.Vector3(bodyWidth * 0.9, chassisHeight * 0.7, crumpleSize)),
+        CuboidGeometry(vm.Vector3(dims.bodyWidth * 0.9, dims.chassisHeight * 0.7, crumpleSize)),
         crumpleMaterial,
       ),
     )..position = vm.Vector3(
         0,
-        wheelRadius + chassisHeight / 2,
-        bodyLength / 2 - crumpleSize / 2,
+        dims.wheelRadius + dims.chassisHeight / 2,
+        dims.bodyLength / 2 - crumpleSize / 2,
       );
     variant.add(crumple);
   }
