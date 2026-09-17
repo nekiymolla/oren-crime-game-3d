@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart';
 
@@ -30,7 +31,7 @@ class GameHud extends StatefulWidget {
 }
 
 class _GameHudState extends State<GameHud> {
-  final Game game = Game();
+  final Game game = Game(debugShowRoadGraph: kDebugMode);
   bool _ready = false;
 
   @override

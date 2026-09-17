@@ -20,6 +20,15 @@ import '../world/world_config.dart';
 /// состоянием. Виджет (см. game_view.dart) только строит его и пробрасывает
 /// тики; вся геймплейная логика живёт здесь и в компонентах узлов.
 class Game {
+  Game({this.debugShowRoadGraph = false});
+
+  /// Жёлтые линии вдоль дорог (см. `road_graph.dart` — граф пока без
+  /// другого визуального потребителя, кроме пешеходов, которым линии не
+  /// нужны) — отладочный инструмент, не то, что должен видеть игрок в
+  /// обычной игре. Значение приходит из GameHud (там доступен kDebugMode
+  /// — Game сам остаётся чистым Dart-классом без импорта Flutter).
+  final bool debugShowRoadGraph;
+
   final Scene scene = Scene();
   late final Node playerNode;
   late final Node cameraNode;
@@ -74,10 +83,10 @@ class Game {
     final vegetation = VegetationBatch();
     scene.add(vegetation.buildNode());
 
-    // Дорожный граф — отладочная визуализация (жёлтые линии вдоль дорог)
-    // плюс теперь настоящий потребитель: NPC-пешеходы ходят по нему же.
+    // Дорожный граф — настоящий потребитель: NPC-пешеходы ходят по нему.
+    // Жёлтые линии-визуализация — только в debug-сборке (debugShowRoadGraph).
     final roadGraph = await loadRoadGraph();
-    scene.add(buildRoadGraphDebugNode(roadGraph));
+    if (debugShowRoadGraph) scene.add(buildRoadGraphDebugNode(roadGraph));
 
     pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root);
     scene.add(pedestrians.buildNode());
@@ -108,8 +117,8 @@ class Game {
 
     // Рядом со спавном игрока (см. WorldConfig.playerSpawnPosition) — тот же
     // открытый парк, чтобы машина была видна и доступна сразу.
-    vehicle = buildPlaceholderSedan()
-      ..node.position = worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
+    vehicle = await buildPlaceholderSedan();
+    vehicle.node.position = worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
     scene.add(vehicle.node);
 
     // Пара припаркованных машин для разнообразия ("больше машин", см.

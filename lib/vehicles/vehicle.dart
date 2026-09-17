@@ -6,6 +6,7 @@ import 'package:vector_math/vector_math.dart' as vm;
 import 'vehicle_controller_component.dart';
 import 'vehicle_damage.dart';
 import 'vehicle_input_bridge_component.dart';
+import 'vehicle_spec.dart';
 
 /// Габариты одного силуэта машины — общие для всех архетипов
 /// (см. [VehicleArchetype]), чтобы не дублировать сборку кузова/колёс на
@@ -133,12 +134,27 @@ class BuiltVehicle {
   }
 }
 
-BuiltVehicle buildPlaceholderSedan() => buildVehicle(VehicleArchetype.sedan);
+Future<BuiltVehicle> buildPlaceholderSedan() =>
+    buildVehicle(VehicleArchetype.sedan, vehicleId: 'car_sedan_01');
+
+/// Запасные числа вождения — если [vehicleId] не задан или записи с таким
+/// id нет в assets/data/vehicles.json (сейчас там есть только car_sedan_01
+/// — у хэтчбека/пикапа своих записей ещё нет, они пока decorative-only и
+/// вообще не проезжают через VehicleControllerComponent).
+const _fallbackSpec = VehicleSpec(
+  maxSpeedKmh: 200.0, // было 165 — см. PROGRESS.md
+  acceleration: 16.0, // было 8.2 — разгон ощущался вялым
+  braking: 32.0, // было 10.5 — торможение тянулось неприлично долго
+);
 
 /// Собирает управляемую машину — с контроллером вождения и системой
 /// повреждений (см. [BuiltVehicle]). Для декоративных припаркованных машин
-/// без физики/повреждений см. [buildStaticVehicleVisual].
-BuiltVehicle buildVehicle(VehicleDimensions dims) {
+/// без физики/повреждений см. [buildStaticVehicleVisual]. Числа
+/// разгона/торможения/скорости — из assets/data/vehicles.json по
+/// [vehicleId], либо [_fallbackSpec], если записи нет.
+Future<BuiltVehicle> buildVehicle(VehicleDimensions dims, {String? vehicleId}) async {
+  final spec = (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ?? _fallbackSpec;
+
   final node = Node();
 
   final bodyVariants = {
@@ -148,9 +164,9 @@ BuiltVehicle buildVehicle(VehicleDimensions dims) {
   _addWheels(node, dims);
 
   final controller = VehicleControllerComponent(
-    maxSpeed: 55.6, // 200 км/ч — быстрее прежних 165 (см. PROGRESS.md)
-    acceleration: 16.0, // было 8.2 — разгон ощущался вялым
-    braking: 32.0, // было 10.5 — торможение тянулось неприлично долго
+    maxSpeed: spec.maxSpeedMs,
+    acceleration: spec.acceleration,
+    braking: spec.braking,
     groundPlaneHeight: 0.0,
     bodyHalfWidth: dims.bodyWidth / 2,
     bodyHalfLength: dims.bodyLength / 2,
