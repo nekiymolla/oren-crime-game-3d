@@ -1,0 +1,11 @@
+{
+  "name": "osm_pipeline",
+  "private": true,
+  "type": "module",
+  "description": "Разбиение .glb квартала на пространственные ячейки (grid_split.mjs) — вызывается из convert_to_glb.sh. Не часть приложения.",
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0"
+  }
+}

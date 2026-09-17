@@ -7,10 +7,10 @@
     "longitude": 55.107186
   },
   "chunkSizeMeters": 200.0,
-  "streamingRadiusChunks": 2,
+  "streamingRadiusChunks": 1,
   "playerSpawn": {
-    "positionLocal": [0.0, 0.0, 0.0],
+    "positionLocal": [-79.0, 0.0, 17.0],
     "headingDegrees": 0.0,
-    "comment": "Совпадает с geoOrigin — дом игрока, ул. Весенняя, 3"
+    "comment": "НЕ geoOrigin буквально — адресная точка дома (0,0,0) лежит внутри его геометрического центра, и это ещё и угол сразу 4 чанков сетки (см. PROGRESS.md). Спавн перенесён в открытый парк рядом — там же спавнится и машина (см. Game.load())."
   }
 }

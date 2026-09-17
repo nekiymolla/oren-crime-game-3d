@@ -38,7 +38,7 @@ class GameRoot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const content = GameHud();
+    final content = GameHud(debugOverlay: _debugOverlayController);
 
     if (kDebugMode) {
       return FpsOverlay(controller: _debugOverlayController, child: content);

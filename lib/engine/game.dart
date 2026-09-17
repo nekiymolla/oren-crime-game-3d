@@ -8,7 +8,10 @@ import '../core/game_mode.dart';
 import '../player/player_input_bridge_component.dart';
 import '../vehicles/vehicle.dart';
 import '../world/district.dart';
+import '../world/district_streamer.dart';
 import '../world/terrain.dart';
+import '../world/vegetation.dart';
+import '../world/world_config.dart';
 
 /// Чистый Dart-класс без импорта Flutter — владеет сценой и игровым
 /// состоянием. Виджет (см. game_view.dart) только строит его и пробрасывает
@@ -18,6 +21,7 @@ class Game {
   late final Node playerNode;
   late final Node cameraNode;
   late final BuiltVehicle vehicle;
+  late final DistrictStreamer districtStreamer;
 
   Node? _playerMeshNode;
 
@@ -26,9 +30,10 @@ class Game {
   /// каждый кадр независимо от того, кто шлёт в него drag-события.
   late final FollowCameraController cameraController;
 
-  /// Совпадает с chunkSizeMeters в assets/data/world.json — плейсхолдер-земля
-  /// закрывает ровно один чанк, пока не подключена реальная геометрия квартала.
-  static const double groundSizeMeters = 200.0;
+  /// С запасом покрывает весь загружаемый чанками район (~1900x1600 м, см.
+  /// PROGRESS.md) — плоскость всего 2 треугольника, размер почти бесплатен,
+  /// а без запаса игрок на краю района уходит за плейсхолдер-землю в пустоту.
+  static const double groundSizeMeters = 2200.0;
 
   /// Рост капсулы-плейсхолдера игрока: totalHeight = height + 2*radius.
   static const double _playerCapsuleRadius = 0.4;
@@ -59,7 +64,19 @@ class Game {
     scene.add(_buildSun());
     _buildSky();
 
-    scene.add(await loadYuzhnyDistrict());
+    final worldConfig = await loadWorldConfig();
+    final districtManifest = await loadDistrictManifest();
+    final vegetation = VegetationBatch();
+    scene.add(vegetation.buildNode());
+    districtStreamer = DistrictStreamer(
+      scene: scene,
+      manifest: districtManifest,
+      radiusCells: worldConfig.streamingRadiusChunks,
+      vegetation: vegetation,
+    );
+    // Грузим чанки вокруг реальной точки спавна сразу, не дожидаясь первого
+    // Game.tick() (spawn — не (0,0,0), см. WorldConfig.playerSpawnPosition).
+    districtStreamer.updateAroundPosition(worldConfig.playerSpawnPosition);
 
     final movement = ThirdPersonControllerComponent(
       walkSpeed: 4.5,
@@ -68,9 +85,17 @@ class Game {
       groundPlaneHeight: 0.0,
     );
     playerNode = _buildPlayerNode()..addComponent(movement);
+    playerNode.position = worldConfig.playerSpawnPosition;
+    playerNode.rotation = vm.Quaternion.axisAngle(
+      vm.Vector3(0, 1, 0),
+      worldConfig.playerSpawnHeadingDegrees * math.pi / 180,
+    );
     scene.add(playerNode);
 
-    vehicle = buildPlaceholderSedan()..node.position = vm.Vector3(-3, 0, 2);
+    // Рядом со спавном игрока (см. WorldConfig.playerSpawnPosition) — тот же
+    // открытый парк, чтобы машина была видна и доступна сразу.
+    vehicle = buildPlaceholderSedan()
+      ..node.position = worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
     scene.add(vehicle.node);
 
     cameraNode = Node()..addComponent(CameraComponent(activateOnMount: true));
@@ -152,9 +177,16 @@ class Game {
     return node;
   }
 
+  /// Узел, за которым сейчас "следит" мир — игрок пешком или машина за
+  /// рулём. Публичный, чтобы HUD мог показать координаты в debug-оверлее
+  /// (см. GameView) без дублирования этой развилки по gameModeState.
+  Node get trackedNode => gameModeState.mode == ControlMode.driving ? vehicle.node : playerNode;
+
   /// Общая для всей игры логика тика (таймеры, спавн и т.д.), не привязанная
   /// к одному узлу. Per-node поведение живёт в компонентах, а не здесь.
   void tick(double deltaSeconds) {
+    districtStreamer.updateAroundPosition(trackedNode.globalTransform.getTranslation());
+
     if (gameModeState.mode == ControlMode.driving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
     }

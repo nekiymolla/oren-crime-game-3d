@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart';
 
 import '../../core/game_mode.dart';
+import '../../engine/debug/fps_overlay.dart';
 import '../../engine/game.dart';
 import '../../engine/game_view.dart';
 import '../controls/driving_controls.dart';
@@ -19,7 +20,9 @@ const double _controlsStripHeight = 190;
 /// ландшафте — как в TES: Blades), а не фиксируется на одной ориентации.
 /// Набор кнопок разный пешком/за рулём (см. gameModeState).
 class GameHud extends StatefulWidget {
-  const GameHud({super.key});
+  const GameHud({super.key, this.debugOverlay});
+
+  final DebugOverlayController? debugOverlay;
 
   @override
   State<GameHud> createState() => _GameHudState();
@@ -66,7 +69,7 @@ class _GameHudState extends State<GameHud> {
           return Stack(
             fit: StackFit.expand,
             children: [
-              GameView(game: game),
+              GameView(game: game, debugOverlay: widget.debugOverlay),
               // Drag в этой зоне (весь экран выше полосы управления) вращает
               // камеру вокруг игрока — как ПКМ/правый стик в GTA.
               Positioned(

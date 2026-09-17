@@ -52,3 +52,5 @@ app.*.map.json
 # setup.sh скачивает osm2world_bin/ заново за секунды)
 tools/osm_pipeline/osm2world_bin/
 tools/osm_pipeline/*.osm
+tools/osm_pipeline/node_modules/
+tools/osm_pipeline/overpass_query.txt
