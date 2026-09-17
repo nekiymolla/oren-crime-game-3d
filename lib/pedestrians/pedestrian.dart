@@ -33,11 +33,30 @@ class Pedestrian {
 
 const double _arrivalEpsilon = 0.1;
 
+/// Типы `highway`, по которым реально ходят пешком — не тротуары/полосы
+/// именно для машин (`tertiary` и подобные) или для великов (`cycleway`).
+/// Без фильтра пешеходы гуляли прямо по проезжей части (замечено
+/// пользователем) — в наших OSM-данных отдельных тротуаров почти нет,
+/// `residential`/`unclassified`/`service` — обычные дворовые/жилые улицы
+/// без явного разделения на полосы, пешком по ним ходить реалистично.
+const Set<String> pedestrianHighwayTypes = {
+  'footway',
+  'path',
+  'pedestrian',
+  'living_street',
+  'residential',
+  'unclassified',
+  'service',
+  'steps',
+};
+
 /// Строит карту соседей по рёбрам графа — двунаправленно (пешеход идёт по
-/// тротуару в любую сторону независимо от oneway для машин).
+/// тротуару в любую сторону независимо от oneway для машин), только по
+/// [pedestrianHighwayTypes].
 Map<String, List<String>> buildPedestrianAdjacency(RoadGraph graph) {
   final adjacency = <String, List<String>>{};
   for (final edge in graph.edges) {
+    if (!pedestrianHighwayTypes.contains(edge.highway)) continue;
     (adjacency[edge.from] ??= []).add(edge.to);
     (adjacency[edge.to] ??= []).add(edge.from);
   }

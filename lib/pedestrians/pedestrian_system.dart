@@ -69,12 +69,14 @@ class PedestrianSystem {
 
   /// Пешеход раньше шёл по прямой между узлами графа без проверки на
   /// препятствия — иногда это резало угол здания (см. PROGRESS.md).
-  /// Проверяем каждое ребро рейкастом РОВНО ОДИН РАЗ (кэш по обеим
-  /// сторонам) — не каждый кадр, поэтому не создаёт ту же проблему с
-  /// лагами, что N живых ground-рейкастов на кадр (см. doc-комментарий
-  /// класса): суммарная стоимость на весь граф ограничена числом рёбер
-  /// (≤805 на весь район), а не числом пешеходов или кадров.
-  final Map<String, bool> _edgePassable = {};
+  /// Множество РЁБЕР С ПОДТВЕРЖДЁННОЙ блокировкой — не кэш "проходимо/нет"
+  /// целиком: чанки района грузятся асинхронно, и на старте здание могло
+  /// ещё не подгрузиться к моменту первой проверки (баг, из-за которого
+  /// кэш "true" был бы неверным навсегда). "Открыто" просто перепроверяется
+  /// каждый раз — не каждый кадр (только когда пешеход выбирает это ребро
+  /// целью), суммарно на порядки дешевле, чем N живых ground-рейкастов на
+  /// кадр (см. doc-комментарий класса).
+  final Set<String> _blockedEdges = {};
 
   static const double _eyeHeight = 1.0;
 
@@ -169,7 +171,7 @@ class PedestrianSystem {
   }
 
   /// Если текущая цель пешехода режет угол здания (см. doc-комментарий
-  /// [_edgePassable]), перебирает соседей узла в поисках проходимого —
+  /// [_blockedEdges]), перебирает соседей узла в поисках проходимого —
   /// до 5 попыток, дальше просто оставляет как есть (все соседи узла
   /// перекрыты — редкий крайний случай, не стоит зацикливаться).
   void _ensurePassableTarget(Pedestrian pedestrian) {
@@ -184,26 +186,30 @@ class PedestrianSystem {
 
   bool _isEdgePassable(String fromId, String toId) {
     final key = fromId.compareTo(toId) <= 0 ? '$fromId|$toId' : '$toId|$fromId';
-    final cached = _edgePassable[key];
-    if (cached != null) return cached;
+    // Кэшируем ТОЛЬКО подтверждённую блокировку, не "проходимо" — чанки
+    // района грузятся асинхронно (см. DistrictStreamer), и на самом старте
+    // раньше могло не найтись здание просто потому, что его чанк ещё не
+    // успел прогрузиться; закэшированное "true" тогда навсегда пряталось
+    // бы от реального рейкаста после дозагрузки (баг, замечен
+    // пользователем — пешеходы всё равно проходили сквозь дома). "Открыто"
+    // просто перепроверяется каждый раз — это не каждый кадр (только когда
+    // пешеход выбирает это ребро целью), суммарно на порядки дешевле.
+    if (_blockedEdges.contains(key)) return false;
 
     final from = graph.nodes[fromId];
     final to = graph.nodes[toId];
-    bool passable;
-    if (from == null || to == null || fromId == toId) {
-      passable = true;
-    } else {
-      final origin = from.toVector3(y: _eyeHeight);
-      final delta = to.toVector3(y: _eyeHeight) - origin;
-      final distance = delta.length;
-      // Чуть недолетаем до цели: сама конечная точка иногда лежит впритык
-      // к стене (узел на углу дома), не должна давать ложный "перекрыто".
-      passable = distance < 0.5 ||
-          raycastNode(raycastRoot, vm.Ray.originDirection(origin, delta), maxDistance: distance - 0.5) ==
-              null;
-    }
-    _edgePassable[key] = passable;
-    return passable;
+    if (from == null || to == null || fromId == toId) return true;
+
+    final origin = from.toVector3(y: _eyeHeight);
+    final delta = to.toVector3(y: _eyeHeight) - origin;
+    final distance = delta.length;
+    // Чуть недолетаем до цели: сама конечная точка иногда лежит впритык
+    // к стене (узел на углу дома), не должна давать ложный "перекрыто".
+    final blocked = distance >= 0.5 &&
+        raycastNode(raycastRoot, vm.Ray.originDirection(origin, delta), maxDistance: distance - 0.5) !=
+            null;
+    if (blocked) _blockedEdges.add(key);
+    return !blocked;
   }
 
   /// Только узлы с хотя бы одним соседом — иначе пешеход появится и сразу
