@@ -163,8 +163,44 @@ class Game {
       sunDirection: -_sunLightDirection,
       sunColor: vm.Vector3(1.0, 0.96, 0.88),
     );
-    scene.skybox = Skybox(sky);
-    scene.environment = EnvironmentMap.fromSky(sky);
+    final skybox = Skybox(sky);
+    final environment = EnvironmentMap.fromSky(sky);
+    scene.skybox = skybox;
+    scene.environment = environment;
+
+    // Дешёвый проход света/пост-обработки (flutter_scene-looks skill) — без
+    // SSR/fog/god rays/grain: на слабом Android (RMX5303, см. PROGRESS.md)
+    // уже упирались в fill-rate, тяжёлые эффекты добавлять рано. AO —
+    // half-res специально ради этого же бюджета.
+    //
+    // EnvironmentSettings.applyTo() — ПОЛНЫЙ снимок вида: безусловно
+    // перезаписывает scene.skybox/scene.environment своими полями (см.
+    // applyLookTo в пакете), так что skybox/environment нужно передать
+    // явно — иначе он зануляет только что установленное небо (было: небо
+    // стало чёрным).
+    scene.environmentSettings = EnvironmentSettings(
+      skybox: skybox,
+      environment: environment,
+      toneMapping: ToneMappingMode.aces,
+      exposure: 1.0,
+      colorGradingEnabled: true,
+      saturation: 1.1,
+      contrast: 1.05,
+      temperature: 0.05,
+      bloomEnabled: true,
+      bloomThreshold: 1.1,
+      bloomIntensity: 0.18,
+      bloomScatter: 0.6,
+      // obscurance — самый дешёвый метод AO (и дефолтный в пакете);
+      // groundTruth даёт кадр вдвое дороже (60 -> 32 FPS на iPhone 13 в
+      // тесте) ради качества, которое на этом масштабе сцены не окупается.
+      ambientOcclusionEnabled: true,
+      ambientOcclusionMethod: AmbientOcclusionMethod.obscurance,
+      ambientOcclusionHalfResolution: true,
+      ambientOcclusionIntensity: 0.6,
+      vignetteEnabled: true,
+      vignetteIntensity: 0.15,
+    );
   }
 
   /// Узел-игрок — точка контакта с землёй (её же читает

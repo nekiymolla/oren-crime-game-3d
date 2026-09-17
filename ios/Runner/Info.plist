@@ -4,6 +4,11 @@
 <dict>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
+	<!-- Без этого автономно установленная сборка (без --enable-flutter-gpu
+	     из flutter run) падает с "Flutter GPU must be enabled" — см.
+	     PROGRESS.md. -->
+	<key>FLTEnableFlutterGPU</key>
+	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

@@ -20,6 +20,13 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Без этого автономно установленная сборка (без --enable-
+                 flutter-gpu из flutter run) падает с "Flutter GPU must be
+                 enabled" — см. PROGRESS.md. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.EnableFlutterGPU"
+              android:value="true"
+              />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
