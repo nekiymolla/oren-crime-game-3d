@@ -15,9 +15,6 @@ class GameView extends StatelessWidget {
   Widget build(BuildContext context) {
     // camera: не передаём — используется активная камера сцены
     // (CameraComponent(activateOnMount: true) в Game.load).
-    return SceneView(
-      game.scene,
-      onTick: (elapsed, dt) => game.tick(dt),
-    );
+    return SceneView(game.scene, onTick: (elapsed, dt) => game.tick(dt));
   }
 }
