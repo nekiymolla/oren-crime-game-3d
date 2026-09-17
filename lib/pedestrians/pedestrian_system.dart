@@ -21,6 +21,7 @@ import 'pedestrian.dart';
 class PedestrianSystem {
   PedestrianSystem({
     required this.graph,
+    required this.raycastRoot,
     this.population = 16,
     this.spawnRadius = 120.0,
     this.despawnRadius = 180.0,
@@ -48,6 +49,13 @@ class PedestrianSystem {
   ];
 
   final RoadGraph graph;
+
+  /// Узел, от которого рейкастятся рёбра графа на препятствия (см.
+  /// _isEdgePassable) — сцена целиком, не привязан к конкретному чанку:
+  /// нужный чанк должен быть уже загружен к тому моменту, когда пешеход
+  /// реально собирается пройти по этому ребру (в радиусе видимости).
+  final Node raycastRoot;
+
   final Map<String, List<String>> adjacency;
   final int population;
   final double spawnRadius;
@@ -58,6 +66,17 @@ class PedestrianSystem {
   final math.Random _random;
   final List<Pedestrian> _pedestrians = [];
   bool _spawned = false;
+
+  /// Пешеход раньше шёл по прямой между узлами графа без проверки на
+  /// препятствия — иногда это резало угол здания (см. PROGRESS.md).
+  /// Проверяем каждое ребро рейкастом РОВНО ОДИН РАЗ (кэш по обеим
+  /// сторонам) — не каждый кадр, поэтому не создаёт ту же проблему с
+  /// лагами, что N живых ground-рейкастов на кадр (см. doc-комментарий
+  /// класса): суммарная стоимость на весь граф ограничена числом рёбер
+  /// (≤805 на весь район), а не числом пешеходов или кадров.
+  final Map<String, bool> _edgePassable = {};
+
+  static const double _eyeHeight = 1.0;
 
   /// Ниже которой наезд машиной не считается — стоящая/едва катящаяся
   /// машина у пешехода не в счёт, только реальный удар.
@@ -89,7 +108,15 @@ class PedestrianSystem {
     final hitRadiusSq = _hitRadius * _hitRadius;
     final despawnRadiusSq = despawnRadius * despawnRadius;
     for (final pedestrian in _pedestrians) {
-      advancePedestrian(pedestrian, graph, adjacency, dt: dt, speed: walkSpeed, random: _random);
+      final arrived = advancePedestrian(
+        pedestrian,
+        graph,
+        adjacency,
+        dt: dt,
+        speed: walkSpeed,
+        random: _random,
+      );
+      if (arrived) _ensurePassableTarget(pedestrian);
 
       if (canHit && (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {
         hits++;
@@ -136,7 +163,47 @@ class PedestrianSystem {
   Pedestrian _createAt(RoadGraphNode node) {
     final neighbors = adjacency[node.id] ?? const <String>[];
     final target = neighbors.isNotEmpty ? neighbors[_random.nextInt(neighbors.length)] : node.id;
-    return Pedestrian(position: node.toVector3(), currentNodeId: node.id, targetNodeId: target);
+    final pedestrian = Pedestrian(position: node.toVector3(), currentNodeId: node.id, targetNodeId: target);
+    _ensurePassableTarget(pedestrian);
+    return pedestrian;
+  }
+
+  /// Если текущая цель пешехода режет угол здания (см. doc-комментарий
+  /// [_edgePassable]), перебирает соседей узла в поисках проходимого —
+  /// до 5 попыток, дальше просто оставляет как есть (все соседи узла
+  /// перекрыты — редкий крайний случай, не стоит зацикливаться).
+  void _ensurePassableTarget(Pedestrian pedestrian) {
+    var attempts = 0;
+    while (!_isEdgePassable(pedestrian.currentNodeId, pedestrian.targetNodeId) && attempts < 5) {
+      final neighbors = adjacency[pedestrian.currentNodeId];
+      if (neighbors == null || neighbors.isEmpty) return;
+      pedestrian.targetNodeId = neighbors[_random.nextInt(neighbors.length)];
+      attempts++;
+    }
+  }
+
+  bool _isEdgePassable(String fromId, String toId) {
+    final key = fromId.compareTo(toId) <= 0 ? '$fromId|$toId' : '$toId|$fromId';
+    final cached = _edgePassable[key];
+    if (cached != null) return cached;
+
+    final from = graph.nodes[fromId];
+    final to = graph.nodes[toId];
+    bool passable;
+    if (from == null || to == null || fromId == toId) {
+      passable = true;
+    } else {
+      final origin = from.toVector3(y: _eyeHeight);
+      final delta = to.toVector3(y: _eyeHeight) - origin;
+      final distance = delta.length;
+      // Чуть недолетаем до цели: сама конечная точка иногда лежит впритык
+      // к стене (узел на углу дома), не должна давать ложный "перекрыто".
+      passable = distance < 0.5 ||
+          raycastNode(raycastRoot, vm.Ray.originDirection(origin, delta), maxDistance: distance - 0.5) ==
+              null;
+    }
+    _edgePassable[key] = passable;
+    return passable;
   }
 
   /// Только узлы с хотя бы одним соседом — иначе пешеход появится и сразу

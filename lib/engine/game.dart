@@ -79,7 +79,7 @@ class Game {
     final roadGraph = await loadRoadGraph();
     scene.add(buildRoadGraphDebugNode(roadGraph));
 
-    pedestrians = PedestrianSystem(graph: roadGraph);
+    pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root);
     scene.add(pedestrians.buildNode());
 
     districtStreamer = DistrictStreamer(
