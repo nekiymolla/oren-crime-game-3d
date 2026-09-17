@@ -5,6 +5,7 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../core/game_mode.dart';
+import '../pedestrians/pedestrian_system.dart';
 import '../player/player_input_bridge_component.dart';
 import '../vehicles/vehicle.dart';
 import '../world/district.dart';
@@ -23,6 +24,7 @@ class Game {
   late final Node cameraNode;
   late final BuiltVehicle vehicle;
   late final DistrictStreamer districtStreamer;
+  late final PedestrianSystem pedestrians;
 
   Node? _playerMeshNode;
 
@@ -70,12 +72,14 @@ class Game {
     final vegetation = VegetationBatch();
     scene.add(vegetation.buildNode());
 
-    // Дорожный граф — пока только отладочная визуализация (жёлтые линии
-    // вдоль дорог), полноценного потребителя (NPC/трафик) ещё нет, см.
-    // PROGRESS.md. Без этого саму топологию было бы не проверить на
-    // устройстве без ручного дебага.
+    // Дорожный граф — отладочная визуализация (жёлтые линии вдоль дорог)
+    // плюс теперь настоящий потребитель: NPC-пешеходы ходят по нему же.
     final roadGraph = await loadRoadGraph();
     scene.add(buildRoadGraphDebugNode(roadGraph));
+
+    pedestrians = PedestrianSystem(graph: roadGraph);
+    scene.add(pedestrians.buildNode());
+
     districtStreamer = DistrictStreamer(
       scene: scene,
       manifest: districtManifest,
@@ -229,7 +233,9 @@ class Game {
   /// Общая для всей игры логика тика (таймеры, спавн и т.д.), не привязанная
   /// к одному узлу. Per-node поведение живёт в компонентах, а не здесь.
   void tick(double deltaSeconds) {
-    districtStreamer.updateAroundPosition(trackedNode.globalTransform.getTranslation());
+    final trackedPosition = trackedNode.globalTransform.getTranslation();
+    districtStreamer.updateAroundPosition(trackedPosition);
+    pedestrians.update(deltaSeconds, trackedPosition);
 
     if (gameModeState.mode == ControlMode.driving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);

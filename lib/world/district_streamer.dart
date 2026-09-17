@@ -52,6 +52,14 @@ class DistrictStreamer {
       loadDistrictChunk(chunk).then((node) {
         _loading.remove(chunk.id);
         _loaded[chunk.id] = node;
+        // Здания/дороги внутри чанка не меняются, пока он смонтирован
+        // (снимается тем же scene.remove(), что и добавлялся) — безопасный
+        // случай для shadowStatic: движок кеширует тень вместо перекодирования
+        // всех caster'ов заново каждый кадр (см. flutter_scene-performance
+        // skill). Не наследуется детьми — ставим на каждый меш-узел отдельно.
+        for (final meshNode in node.meshNodes) {
+          meshNode.shadowStatic = true;
+        }
         scene.add(node);
 
         if (_vegetationScattered.add(chunk.id)) {

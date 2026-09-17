@@ -28,8 +28,17 @@ class VegetationBatch {
 
   static const double _trunkHeight = 2.2;
 
+  /// Деревья сажаются навсегда (см. DistrictStreamer — не убираются вместе
+  /// с выгрузкой чанка) и без потолка их число росло бы весь сеанс по мере
+  /// исследования района, отсюда прогрессирующая просадка FPS с каждой
+  /// новой посещённой ячейкой (см. PROGRESS.md). Жёсткий кап держит
+  /// стоимость растительности постоянной независимо от того, сколько
+  /// исследовано.
+  static const int maxTrees = 220;
+
   final InstancedMesh trunks;
   final InstancedMesh canopies;
+  int _treeCount = 0;
 
   /// Один узел на всю растительность игры — держит оба InstancedMesh.
   /// Не привязан к чанкам: инстансы внутри можно добавлять/убирать, сам
@@ -42,8 +51,11 @@ class VegetationBatch {
   }
 
   /// Добавляет дерево в [position] (корень ствола на уровне земли).
-  /// [scale] — случайный разброс размера для естественности.
+  /// [scale] — случайный разброс размера для естественности. Не делает
+  /// ничего сверх [maxTrees] — см. его комментарий.
   void addTree(vm.Vector3 position, {double scale = 1.0}) {
+    if (_treeCount >= maxTrees) return;
+    _treeCount++;
     trunks.addInstance(
       vm.Matrix4.compose(
         position + vm.Vector3(0, _trunkHeight * scale / 2, 0),
