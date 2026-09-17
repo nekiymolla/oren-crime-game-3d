@@ -59,22 +59,42 @@ class PedestrianSystem {
   final List<Pedestrian> _pedestrians = [];
   bool _spawned = false;
 
+  /// Ниже которой наезд машиной не считается — стоящая/едва катящаяся
+  /// машина у пешехода не в счёт, только реальный удар.
+  static const double hitSpeedThreshold = 3.0;
+  static const double _hitRadius = 1.0;
+
   Node buildNode() => Node()..addComponent(InstancedMeshComponent(bodies));
 
   /// Зовётся каждый кадр из Game.tick(). Первый вызов лениво спавнит
   /// начальную популяцию вокруг [trackedPosition] — раньше нельзя, узлы
-  /// графа сами по себе не знают, где стартует игрок.
-  void update(double dt, vm.Vector3 trackedPosition) {
+  /// графа сами по себе не знают, где стартует игрок. [vehiclePosition]/
+  /// [vehicleSpeed] — если заданы (машина существует и её скорость выше
+  /// [hitSpeedThreshold]), пешеходы в радиусе удара телепортируются
+  /// (см. _respawnNear) и засчитываются в возвращаемое число наездов —
+  /// на нём строится WantedSystem (см. lib/police).
+  int update(
+    double dt,
+    vm.Vector3 trackedPosition, {
+    vm.Vector3? vehiclePosition,
+    double vehicleSpeed = 0.0,
+  }) {
     if (!_spawned) {
       _spawnInitialPopulation(trackedPosition);
       _spawned = true;
     }
 
+    var hits = 0;
+    final canHit = vehiclePosition != null && vehicleSpeed >= hitSpeedThreshold;
+    final hitRadiusSq = _hitRadius * _hitRadius;
     final despawnRadiusSq = despawnRadius * despawnRadius;
     for (final pedestrian in _pedestrians) {
       advancePedestrian(pedestrian, graph, adjacency, dt: dt, speed: walkSpeed, random: _random);
 
-      if ((pedestrian.position - trackedPosition).length2 > despawnRadiusSq) {
+      if (canHit && (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {
+        hits++;
+        _respawnNear(pedestrian, trackedPosition);
+      } else if ((pedestrian.position - trackedPosition).length2 > despawnRadiusSq) {
         _respawnNear(pedestrian, trackedPosition);
       }
 
@@ -87,6 +107,7 @@ class PedestrianSystem {
         ),
       );
     }
+    return hits;
   }
 
   void _spawnInitialPopulation(vm.Vector3 center) {

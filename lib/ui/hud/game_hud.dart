@@ -9,6 +9,7 @@ import '../controls/driving_controls.dart';
 import '../controls/keyboard_controls.dart';
 import '../controls/vehicle_button.dart';
 import '../controls/virtual_joystick.dart';
+import 'wanted_stars.dart';
 
 /// Высота нижней полосы с джойстиком/кнопками — под ней CameraControls не
 /// перехватывает жесты, иначе drag по джойстику конкурировал бы за жест с
@@ -116,6 +117,11 @@ class _GameHudState extends State<GameHud> {
                 left: 24,
                 top: MediaQuery.of(context).padding.top + 16,
                 child: VehicleInteractButton(game: game, onToggle: _toggleVehicle),
+              ),
+              Positioned(
+                right: 24,
+                top: MediaQuery.of(context).padding.top + 16,
+                child: const WantedStars(),
               ),
             ],
           );

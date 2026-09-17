@@ -7,6 +7,7 @@ import 'package:vector_math/vector_math.dart' as vm;
 import '../core/game_mode.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/player_input_bridge_component.dart';
+import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
@@ -25,6 +26,7 @@ class Game {
   late final BuiltVehicle vehicle;
   late final DistrictStreamer districtStreamer;
   late final PedestrianSystem pedestrians;
+  final WantedSystem wantedSystem = WantedSystem();
 
   Node? _playerMeshNode;
 
@@ -235,9 +237,21 @@ class Game {
   void tick(double deltaSeconds) {
     final trackedPosition = trackedNode.globalTransform.getTranslation();
     districtStreamer.updateAroundPosition(trackedPosition);
-    pedestrians.update(deltaSeconds, trackedPosition);
 
-    if (gameModeState.mode == ControlMode.driving && !userIsAdjustingCamera) {
+    final isDriving = gameModeState.mode == ControlMode.driving;
+    final hits = pedestrians.update(
+      deltaSeconds,
+      trackedPosition,
+      vehiclePosition: isDriving ? vehicle.node.globalTransform.getTranslation() : null,
+      vehicleSpeed: isDriving ? vehicle.controller.speed : 0.0,
+    );
+    wantedSystem.update(
+      deltaSeconds,
+      pedestrianHits: hits,
+      isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
+    );
+
+    if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
     }
   }
