@@ -7,6 +7,9 @@ import 'package:vector_math/vector_math.dart' as vm;
 import '../core/game_mode.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/player_input_bridge_component.dart';
+import '../police/arrest_state.dart';
+import '../police/police_system.dart';
+import '../police/wanted_state.dart';
 import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
 import '../world/district.dart';
@@ -35,6 +38,8 @@ class Game {
   late final BuiltVehicle vehicle;
   late final DistrictStreamer districtStreamer;
   late final PedestrianSystem pedestrians;
+  late final PoliceSystem policeSystem;
+  late final WorldConfig worldConfig;
   final WantedSystem wantedSystem = WantedSystem();
 
   Node? _playerMeshNode;
@@ -78,7 +83,7 @@ class Game {
     scene.add(_buildSun());
     _buildSky();
 
-    final worldConfig = await loadWorldConfig();
+    worldConfig = await loadWorldConfig();
     final districtManifest = await loadDistrictManifest();
     final vegetation = VegetationBatch();
     scene.add(vegetation.buildNode());
@@ -90,6 +95,7 @@ class Game {
 
     pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root);
     scene.add(pedestrians.buildNode());
+    policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene);
 
     districtStreamer = DistrictStreamer(
       scene: scene,
@@ -274,9 +280,26 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
+    final caught = policeSystem.update(deltaSeconds, trackedPosition);
+    if (caught) _handleArrest();
+
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
     }
+  }
+
+  /// Игрока поймали (см. PoliceSystem.update) — розыск сбрасывается,
+  /// патрульные машины исчезают сразу (как в GTA на экране "задержан", не
+  /// постепенно), игрок телепортируется к точке спавна (условная
+  /// "безопасная точка" — отдельного полицейского участка на карте пока
+  /// нет). HUD показывает баннер через ArrestState (см. arrest_banner.dart).
+  void _handleArrest() {
+    wantedState.stars = 0;
+    policeSystem.clearUnits();
+    arrestState.trigger();
+    if (gameModeState.mode == ControlMode.driving) toggleVehicle();
+    playerNode.position = worldConfig.playerSpawnPosition;
+    cameraController.followTarget = playerNode;
   }
 
   /// Плавно доворачивает орбиту камеры к [targetYaw] по кратчайшей дуге —

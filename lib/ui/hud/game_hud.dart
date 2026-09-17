@@ -10,6 +10,7 @@ import '../controls/driving_controls.dart';
 import '../controls/keyboard_controls.dart';
 import '../controls/vehicle_button.dart';
 import '../controls/virtual_joystick.dart';
+import 'arrest_banner.dart';
 import 'wanted_stars.dart';
 
 /// Высота нижней полосы с джойстиком/кнопками — под ней CameraControls не
@@ -124,6 +125,7 @@ class _GameHudState extends State<GameHud> {
                 top: MediaQuery.of(context).padding.top + 16,
                 child: const WantedStars(),
               ),
+              const ArrestBanner(),
             ],
           );
         },

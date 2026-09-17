@@ -86,6 +86,22 @@ class VehicleArchetype {
     cargoBedLength: 2.5,
     paintColor: vm.Vector4(0.35, 0.36, 0.34, 1.0), // защитный хаки
   );
+
+  /// Тот же силуэт, что и седан — только цвет; светобалка на крыше
+  /// добавляется отдельно самой полицейской системой (см.
+  /// lib/police/police_system.dart), не частью базовой геометрии машины.
+  static final police = VehicleDimensions(
+    bodyWidth: 1.8,
+    chassisHeight: 0.65,
+    bodyLength: 4.4,
+    cabinHeight: 0.62,
+    cabinLength: 2.3,
+    cabinWidth: 1.8 * 0.86,
+    cabinZOffset: -0.35,
+    wheelRadius: 0.33,
+    wheelWidth: 0.22,
+    paintColor: vm.Vector4(0.92, 0.92, 0.94, 1.0), // белый кузов
+  );
 }
 
 /// Процедурный плейсхолдер машины — низкий кузов + кабина сверху (сдвиг
@@ -151,10 +167,32 @@ const _fallbackSpec = VehicleSpec(
 /// повреждений (см. [BuiltVehicle]). Для декоративных припаркованных машин
 /// без физики/повреждений см. [buildStaticVehicleVisual]. Числа
 /// разгона/торможения/скорости — из assets/data/vehicles.json по
-/// [vehicleId], либо [_fallbackSpec], если записи нет.
-Future<BuiltVehicle> buildVehicle(VehicleDimensions dims, {String? vehicleId}) async {
+/// [vehicleId], либо [_fallbackSpec], если записи нет. [attachPlayerInput]
+/// выключается для AI-машин (см. [buildVehicleWithSpec]) — иначе они бы
+/// получали тот же джойстик, что и машина игрока.
+Future<BuiltVehicle> buildVehicle(
+  VehicleDimensions dims, {
+  String? vehicleId,
+  bool attachPlayerInput = true,
+}) async {
   final spec = (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ?? _fallbackSpec;
+  return buildVehicleWithSpec(dims, spec, attachPlayerInput: attachPlayerInput);
+}
 
+/// Синхронное ядро [buildVehicle] — без чтения JSON. Нужно
+/// PoliceSystem-у: спавн патрульной машины происходит посреди
+/// Game.tick() (синхронного), а не в load(), поэтому спека загружается
+/// один раз заранее (см. PoliceSystem.create), а сама сборка узла —
+/// синхронная, чтобы не растягивать спавн на несколько кадров.
+/// [attachPlayerInput] = false для AI-машин — их вход
+/// (throttle/steer) пишет AI, а не VehicleInputBridgeComponent
+/// (который иначе слушал бы джойстик игрока независимо от того, в какую
+/// машину он сейчас сел).
+BuiltVehicle buildVehicleWithSpec(
+  VehicleDimensions dims,
+  VehicleSpec spec, {
+  bool attachPlayerInput = true,
+}) {
   final node = Node();
 
   final bodyVariants = {
@@ -171,9 +209,8 @@ Future<BuiltVehicle> buildVehicle(VehicleDimensions dims, {String? vehicleId}) a
     bodyHalfWidth: dims.bodyWidth / 2,
     bodyHalfLength: dims.bodyLength / 2,
   );
-  node
-    ..addComponent(controller)
-    ..addComponent(VehicleInputBridgeComponent(controller));
+  node.addComponent(controller);
+  if (attachPlayerInput) node.addComponent(VehicleInputBridgeComponent(controller));
 
   return BuiltVehicle(
     node: node,

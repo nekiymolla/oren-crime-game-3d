@@ -30,6 +30,37 @@
       "headlights": true,
       "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
       "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg"
+    },
+    {
+      "id": "car_police_01",
+      "displayName": "Патрульная машина",
+      "modelClass": "sedan",
+      "modelAsset": "assets/models/vehicles/car_police_01.glb",
+      "mass": 1500.0,
+      "maxSpeedKmh": 190.0,
+      "acceleration": 15.0,
+      "braking": 30.0,
+      "engine": {
+        "maxTorqueNm": 210.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [3.5, 2.1, 1.4, 1.0, 0.8]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.18
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 1.1
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 10.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg"
     }
   ]
 }
