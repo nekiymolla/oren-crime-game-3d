@@ -40,7 +40,11 @@ class GameRoot extends StatelessWidget {
   Widget build(BuildContext context) {
     final content = GameHud(debugOverlay: _debugOverlayController);
 
-    if (kDebugMode) {
+    // !kReleaseMode, а не kDebugMode: производительность имеет смысл мерить
+    // только в --profile (debug-числа ничего не значат — ассерты, нет AOT),
+    // а в profile-сборке kDebugMode уже false — оверлей с FPS пропадал ровно
+    // в том режиме, ради которого он нужен. Из релиза он всё так же исключён.
+    if (!kReleaseMode) {
       return FpsOverlay(controller: _debugOverlayController, child: content);
     }
     return content;

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/scheduler.dart';
@@ -36,26 +37,60 @@ class FpsOverlay extends StatefulWidget {
   State<FpsOverlay> createState() => _FpsOverlayState();
 }
 
-class _FpsOverlayState extends State<FpsOverlay> with SingleTickerProviderStateMixin {
-  late final Ticker _ticker;
-  Duration _lastTick = Duration.zero;
+/// Сколько последних кадров усредняем. ~2 секунды при 30 FPS: мгновенное
+/// значение скачет так, что по нему нельзя принимать решения (ровно на этом
+/// оверлей раньше и врал — показывал 20 FPS там, где играется как 5).
+const int _windowFrames = 60;
+
+class _FpsOverlayState extends State<FpsOverlay> {
+  final List<FrameTiming> _recent = [];
+  Timer? _refresh;
   double _fps = 0;
   double _frameMs = 0;
+  double _uiMs = 0;
+  double _rasterMs = 0;
 
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker(_onTick)..start();
+    // addTimingsCallback — единственный честный источник: даёт РЕАЛЬНОЕ время
+    // кадра с разбивкой на UI и raster. Прошлая версия считала дельту между
+    // тиками планировщика, а это не то же самое: когда сцена упирается в GPU,
+    // UI-поток продолжает бежать вперёд по конвейеру, и дельта тиков
+    // показывает бодрые цифры, пока на экране слайдшоу. Android-овский
+    // dumpsys gfxinfo тут тоже не помощник — Flutter с Impeller рисует мимо
+    // HWUI, и gfxinfo видит ноль кадров.
+    SchedulerBinding.instance.addTimingsCallback(_onTimings);
+    // Перерисовываем текст раз в полсекунды, а не на каждый кадр: setState
+    // покадрово сам грузил бы UI-поток, то есть инструмент искажал бы то,
+    // что измеряет.
+    _refresh = Timer.periodic(const Duration(milliseconds: 500), (_) => _recompute());
     widget.controller.addListener(_onDebugLinesChanged);
   }
 
-  void _onTick(Duration elapsed) {
-    final deltaMs = (elapsed - _lastTick).inMicroseconds / 1000.0;
-    _lastTick = elapsed;
-    if (deltaMs <= 0) return;
+  void _onTimings(List<FrameTiming> timings) {
+    _recent.addAll(timings);
+    if (_recent.length > _windowFrames) {
+      _recent.removeRange(0, _recent.length - _windowFrames);
+    }
+  }
+
+  void _recompute() {
+    if (!mounted || _recent.isEmpty) return;
+    var total = 0.0;
+    var ui = 0.0;
+    var raster = 0.0;
+    for (final timing in _recent) {
+      total += timing.totalSpan.inMicroseconds / 1000.0;
+      ui += timing.buildDuration.inMicroseconds / 1000.0;
+      raster += timing.rasterDuration.inMicroseconds / 1000.0;
+    }
+    final count = _recent.length;
     setState(() {
-      _frameMs = deltaMs;
-      _fps = 1000.0 / deltaMs;
+      _frameMs = total / count;
+      _uiMs = ui / count;
+      _rasterMs = raster / count;
+      _fps = _frameMs > 0 ? 1000.0 / _frameMs : 0;
     });
   }
 
@@ -63,7 +98,8 @@ class _FpsOverlayState extends State<FpsOverlay> with SingleTickerProviderStateM
 
   @override
   void dispose() {
-    _ticker.dispose();
+    SchedulerBinding.instance.removeTimingsCallback(_onTimings);
+    _refresh?.cancel();
     widget.controller.removeListener(_onDebugLinesChanged);
     super.dispose();
   }
@@ -91,7 +127,11 @@ class _FpsOverlayState extends State<FpsOverlay> with SingleTickerProviderStateM
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Text('FPS: ${_fps.toStringAsFixed(0)}  '
-                        '(${_frameMs.toStringAsFixed(1)} ms)'),
+                        '(${_frameMs.toStringAsFixed(1)} ms avg)'),
+                    // Разбивка по потокам — то, ради чего обычно открывают
+                    // DevTools: какой из двух за бюджетом, тот и чиним.
+                    Text('ui: ${_uiMs.toStringAsFixed(1)}  '
+                        'raster: ${_rasterMs.toStringAsFixed(1)}'),
                     for (final entry in widget.controller.lines.entries)
                       Text('${entry.key}: ${entry.value}'),
                   ],
