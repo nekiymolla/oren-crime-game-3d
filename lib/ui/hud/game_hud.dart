@@ -4,6 +4,7 @@ import 'package:flutter_scene/scene.dart';
 
 import '../../core/game_mode.dart';
 import '../../engine/debug/fps_overlay.dart';
+import '../../engine/debug/quality_debug_panel.dart';
 import '../../engine/game.dart';
 import '../../engine/game_view.dart';
 import '../controls/driving_controls.dart';
@@ -125,6 +126,16 @@ class _GameHudState extends State<GameHud> {
                 top: MediaQuery.of(context).padding.top + 16,
                 child: const WantedStars(),
               ),
+              // Не kDebugMode, а !kReleaseMode: мерить производительность
+              // можно только в --profile (в debug числа не значат ничего —
+              // ассерты, нет AOT), а там kDebugMode уже false. Из релиза
+              // ручка всё равно исчезает.
+              if (!kReleaseMode)
+                Positioned(
+                  right: 24,
+                  top: MediaQuery.of(context).padding.top + 72,
+                  child: QualityDebugPanel(game: game),
+                ),
               const ArrestBanner(),
             ],
           );

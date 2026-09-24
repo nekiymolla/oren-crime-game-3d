@@ -5,6 +5,7 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../core/game_mode.dart';
+import '../core/quality_settings.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/player_input_bridge_component.dart';
 import '../police/arrest_state.dart';
@@ -42,7 +43,39 @@ class Game {
   late final WorldConfig worldConfig;
   final WantedSystem wantedSystem = WantedSystem();
 
+  /// Пресеты качества из assets/data/quality.json (ТЗ, раздел 23).
+  /// [quality] — активный; рендерную его часть можно менять на живой сцене
+  /// через [applyQuality], мировая (население, деревья) фиксируется на
+  /// [load], потому что меняет состав уже созданных систем.
+  late final QualityPresets qualityPresets;
+  late QualitySettings quality;
+
+  /// Ссылки на то, что [applyQuality] правит при переключении пресета в
+  /// рантайме. Хранятся полями, потому что иначе до них не добраться: свет
+  /// и небо строятся один раз внутри load().
+  DirectionalLight? _sunLight;
+  CameraComponent? _cameraComponent;
+  Skybox? _skybox;
+  EnvironmentMap? _environment;
+
+  /// Плейсхолдер-земля и растительность — под подозрением по результатам
+  /// замера: raster держится под сотню миллисекунд даже когда камера смотрит
+  /// в пустое небо, значит платим не за геометрию района, а за что-то
+  /// полноэкранное и постоянное. Земля 2200x2200 с полным PBR и
+  /// environment map закрывает пол-экрана и считает физкорректное освещение
+  /// ради плоской зелёной заливки — первый кандидат. Держим ссылки, чтобы
+  /// debug-панель могла погасить их по одному и измерить вклад каждого.
+  Node? _groundNode;
+  Node? _vegetationNode;
+  VegetationBatch? _vegetation;
+  ThirdPersonControllerComponent? _movement;
+
   Node? _playerMeshNode;
+
+  /// Розовые лучи "пешеход → цель" (см. PedestrianSystem.
+  /// buildDebugTargetLinesNode) — только в debug-сборке, рядом с жёлтым
+  /// дорожным графом. null, если debugShowRoadGraph выключен.
+  Node? _pedestrianDebugLinesNode;
 
   /// Публичный, чтобы GameHud мог подключить [CameraControls] — сам
   /// контроллер прикреплён к cameraNode как компонент и двигает камеру
@@ -74,27 +107,47 @@ class Game {
   Future<void> load() async {
     await Scene.initializeStaticResources();
 
+    // Раньше всего остального: пресет задаёт и параметры света/неба/камеры,
+    // которые строятся ниже по этому же методу, и размер населения/деревьев.
+    qualityPresets = await loadQualityPresets();
+    quality = qualityPresets.defaultPreset;
+    scene.renderScale = quality.renderScale;
+    scene.antiAliasingMode = quality.antiAliasing;
+
     // Плейсхолдер-земля чуть ниже нуля — подложка на случай пустых участков
     // между дорогами/зданиями (osm2world строит поверхности только там, где
     // OSM что-то размечает, а разметка реального района местами скудная —
     // см. PROGRESS.md).
-    scene.add(buildPlaceholderGround(sizeMeters: groundSizeMeters)
-      ..position = vm.Vector3(0, -0.05, 0));
+    final ground = buildPlaceholderGround(sizeMeters: groundSizeMeters)
+      ..position = vm.Vector3(0, -0.05, 0);
+    _groundNode = ground;
+    scene.add(ground);
     scene.add(_buildSun());
     _buildSky();
 
     worldConfig = await loadWorldConfig();
     final districtManifest = await loadDistrictManifest();
-    final vegetation = VegetationBatch();
-    scene.add(vegetation.buildNode());
+    final vegetation = VegetationBatch(maxTrees: quality.maxTrees);
+    _vegetation = vegetation;
+    final vegetationNode = vegetation.buildNode();
+    _vegetationNode = vegetationNode;
+    scene.add(vegetationNode);
 
     // Дорожный граф — настоящий потребитель: NPC-пешеходы ходят по нему.
     // Жёлтые линии-визуализация — только в debug-сборке (debugShowRoadGraph).
     final roadGraph = await loadRoadGraph();
     if (debugShowRoadGraph) scene.add(buildRoadGraphDebugNode(roadGraph));
 
-    pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root);
+    pedestrians = PedestrianSystem(
+      graph: roadGraph,
+      raycastRoot: scene.root,
+      population: quality.pedestrianPopulation,
+    );
     scene.add(pedestrians.buildNode());
+    if (debugShowRoadGraph) {
+      _pedestrianDebugLinesNode = pedestrians.buildDebugTargetLinesNode();
+      scene.add(_pedestrianDebugLinesNode!);
+    }
     policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene);
 
     districtStreamer = DistrictStreamer(
@@ -103,11 +156,17 @@ class Game {
       radiusCells: worldConfig.streamingRadiusChunks,
       vegetation: vegetation,
     );
-    // Грузим чанки вокруг реальной точки спавна сразу, не дожидаясь первого
-    // Game.tick() (spawn — не (0,0,0), см. WorldConfig.playerSpawnPosition).
-    districtStreamer.updateAroundPosition(worldConfig.playerSpawnPosition);
+    // Грузим чанки вокруг реальной точки спавна СИНХРОННО с load() (await,
+    // не fire-and-forget) — GameView/тики стартуют только после того, как
+    // load() завершится (см. GameHud._ready), а PedestrianSystem спавнит
+    // популяцию и выбирает первые цели лениво на первом update(). Без этого
+    // await здания вокруг спавна могли физически не успеть попасть в сцену
+    // к моменту первой проверки _isEdgePassable — путь ошибочно считался
+    // "открытым" не из-за бага рейкаста, а из-за отсутствующей геометрии
+    // (см. DistrictStreamer.updateAroundPosition, BUGS.md).
+    await districtStreamer.updateAroundPosition(worldConfig.playerSpawnPosition);
 
-    final movement = ThirdPersonControllerComponent(
+    final movement = _movement = ThirdPersonControllerComponent(
       walkSpeed: 4.5,
       runMultiplier: 1.8,
       jumpVelocity: 6.0,
@@ -141,7 +200,12 @@ class Game {
         ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4),
     );
 
-    cameraNode = Node()..addComponent(CameraComponent(activateOnMount: true));
+    final cameraComponent = CameraComponent(
+      projection: PerspectiveProjection(far: quality.drawDistanceMeters),
+      activateOnMount: true,
+    );
+    _cameraComponent = cameraComponent;
+    cameraNode = Node()..addComponent(cameraComponent);
     cameraController = FollowCameraController(
       followTarget: playerNode,
       distance: 6.0,
@@ -155,6 +219,69 @@ class Game {
     // cameraController, поэтому он добавляется последним.
     playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController));
   }
+
+  /// Применяет рендерную часть пресета к уже живой сцене — ради этого
+  /// переключатель и нужен: A/B-замер снимается на одном устройстве без
+  /// пересборки, а значит сравниваются кадры одной и той же сборки в одном
+  /// и том же месте карты.
+  ///
+  /// Мировая часть пресета (население пешеходов, потолок деревьев) здесь
+  /// сознательно НЕ применяется: она меняет состав уже созданных систем —
+  /// это перезапуск, а не настройка. После переключения пресета кнопкой
+  /// население останется от того пресета, с которым игра стартовала.
+  void applyQuality(QualitySettings settings) {
+    quality = settings;
+    scene.renderScale = settings.renderScale;
+    scene.antiAliasingMode = settings.antiAliasing;
+    _sunLight
+      ?..castsShadow = settings.shadowsEnabled
+      ..shadowCascadeCount = settings.shadowCascadeCount
+      ..shadowMaxDistance = settings.shadowMaxDistance
+      ..shadowMapResolution = settings.shadowMapResolution;
+    _cameraComponent?.projection = PerspectiveProjection(far: settings.drawDistanceMeters);
+    _applyEnvironmentSettings();
+  }
+
+  /// Debug-ручки для замеров: гасят подозреваемых по одному, чтобы увидеть
+  /// вклад каждого в кадр. Не игровая логика — дёргаются только из
+  /// debug-панели, в релизе её нет.
+  bool get groundVisible => _groundNode?.visible ?? false;
+  set groundVisible(bool value) => _groundNode?.visible = value;
+
+  bool get vegetationVisible => _vegetationNode?.visible ?? false;
+  set vegetationVisible(bool value) => _vegetationNode?.visible = value;
+
+  // Ручки vegetationShadowStatic здесь больше нет: выигрыш измерен (-46.1 мс
+  // raster), и shadowStatic стал постоянным поведением VegetationBatch.
+
+  /// Горизонтальные рейкасты игрока (обход препятствий). Встроенный
+  /// контроллер кидает 3 высоты x 3 боковых смещения = 9 лучей на кадр плюс
+  /// один на землю, и при ходьбе ui подскакивает с 10.3 до 21.6 мс. Ручка
+  /// нужна, чтобы отделить их вклад от остального UI-потока: `obstacleRadius`
+  /// = 0 отключает именно их (задокументировано в пакете), не трогая
+  /// гравитацию, прыжок и следование за землёй.
+  ///
+  /// Это диагностика, а не игровая настройка: без этих лучей игрок проходит
+  /// сквозь стены.
+  ///
+  /// **Прореживать лучи по кадрам нельзя — проверено 19.09.2026, игрок сразу
+  /// зашёл сквозь стену.** Цифры соблазнительные (при ходьбе 31 -> 43 FPS,
+  /// ui 22.8 -> 16.5), но встроенный контроллер не ВЫТАЛКИВАЕТ из стены, он
+  /// ПРЕДОТВРАЩАЕТ вход, смещая движение вдоль препятствия. Пропустив кадр,
+  /// игрок оказывается внутри геометрии, и возврата оттуда не предусмотрено.
+  /// Рассуждение "за кадр пройдёт 7 см, на следующем вернёт" было неверным.
+  /// Путь к экономии здесь — меньше лучей и уже область поиска (свой
+  /// контроллер вместо встроенного), а не реже проверки.
+  static const double _defaultObstacleRadius = 0.85;
+
+  bool _obstacleAvoidance = true;
+
+  bool get obstacleAvoidance => _obstacleAvoidance;
+  set obstacleAvoidance(bool value) {
+    _obstacleAvoidance = value;
+    _movement?.obstacleRadius = value ? _defaultObstacleRadius : 0.0;
+  }
+
 
   /// Сесть в машину / выйти из неё — не даёт сработать, если игрок дальше
   /// [_vehicleInteractRadius] от машины. Переключает и куда едет камера, и
@@ -179,7 +306,14 @@ class Game {
   static final vm.Vector3 _sunLightDirection = vm.Vector3(-0.4, -1.0, -0.3);
 
   Node _buildSun() {
-    final sunLight = DirectionalLight(intensity: 4.0, castsShadow: true);
+    final sunLight = DirectionalLight(
+      intensity: 4.0,
+      castsShadow: quality.shadowsEnabled,
+      shadowCascadeCount: quality.shadowCascadeCount,
+      shadowMaxDistance: quality.shadowMaxDistance,
+      shadowMapResolution: quality.shadowMapResolution,
+    );
+    _sunLight = sunLight;
     final sunNode = Node()..addComponent(DirectionalLightComponent(sunLight));
     // Компонент светит вдоль local +Z узла, поэтому направление задаётся
     // поворотом узла, а не полем DirectionalLight.direction.
@@ -202,6 +336,8 @@ class Game {
     final environment = EnvironmentMap.fromSky(sky);
     scene.skybox = skybox;
     scene.environment = environment;
+    _skybox = skybox;
+    _environment = environment;
 
     // Дешёвый проход света/пост-обработки (flutter_scene-looks skill) — без
     // SSR/fog/god rays/grain: на слабом Android (RMX5303, см. PROGRESS.md)
@@ -213,23 +349,37 @@ class Game {
     // applyLookTo в пакете), так что skybox/environment нужно передать
     // явно — иначе он зануляет только что установленное небо (было: небо
     // стало чёрным).
+    _applyEnvironmentSettings();
+  }
+
+  /// Пересобирает EnvironmentSettings под текущий [quality]. Отдельным
+  /// методом, а не внутри _buildSky, потому что переключение пресета в
+  /// рантайме обязано пересоздать снимок целиком: EnvironmentSettings —
+  /// это ПОЛНЫЙ снимок вида, точечно "выключить bloom" в уже присвоенном
+  /// объекте нельзя.
+  void _applyEnvironmentSettings() {
     scene.environmentSettings = EnvironmentSettings(
-      skybox: skybox,
-      environment: environment,
+      skybox: _skybox,
+      environment: _environment,
       toneMapping: ToneMappingMode.aces,
       exposure: 1.0,
       colorGradingEnabled: true,
       saturation: 1.1,
       contrast: 1.05,
       temperature: 0.05,
-      bloomEnabled: true,
+      bloomEnabled: quality.bloomEnabled,
       bloomThreshold: 1.1,
       bloomIntensity: 0.18,
       bloomScatter: 0.6,
       // obscurance — самый дешёвый метод AO (и дефолтный в пакете);
       // groundTruth даёт кадр вдвое дороже (60 -> 32 FPS на iPhone 13 в
       // тесте) ради качества, которое на этом масштабе сцены не окупается.
-      ambientOcclusionEnabled: true,
+      //
+      // Выключение AO заодно убирает depth prepass (в движке wantDepthPrepass
+      // завязан на ambientOcclusion.enabled), а с ним early-Z, который режет
+      // overdraw — так что на fill-bound сцене выключение AO может выйти
+      // МЕДЛЕННЕЕ. Проверять замером, а не считать очевидным.
+      ambientOcclusionEnabled: quality.ambientOcclusionEnabled,
       ambientOcclusionMethod: AmbientOcclusionMethod.obscurance,
       ambientOcclusionHalfResolution: true,
       ambientOcclusionIntensity: 0.6,
@@ -266,6 +416,9 @@ class Game {
   void tick(double deltaSeconds) {
     final trackedPosition = trackedNode.globalTransform.getTranslation();
     districtStreamer.updateAroundPosition(trackedPosition);
+    // Возвращает кэш теней растительности, если в этом кадре досадили
+    // деревья при загрузке чанка (см. VegetationBatch.commitShadowCache).
+    _vegetation?.commitShadowCache();
 
     final isDriving = gameModeState.mode == ControlMode.driving;
     final hits = pedestrians.update(
@@ -274,6 +427,9 @@ class Game {
       vehiclePosition: isDriving ? vehicle.node.globalTransform.getTranslation() : null,
       vehicleSpeed: isDriving ? vehicle.controller.speed : 0.0,
     );
+    if (_pedestrianDebugLinesNode != null) {
+      pedestrians.updateDebugTargetLines(_pedestrianDebugLinesNode!);
+    }
     wantedSystem.update(
       deltaSeconds,
       pedestrianHits: hits,

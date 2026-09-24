@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
@@ -86,6 +87,70 @@ class PedestrianSystem {
   static const double _hitRadius = 1.0;
 
   Node buildNode() => Node()..addComponent(InstancedMeshComponent(bodies));
+
+  /// Материал для [buildDebugTargetLinesNode] — ярко-розовый, не пересекается
+  /// с жёлтыми линиями дорожного графа (см. road_graph.dart), чтобы оба
+  /// debug-слоя можно было включить одновременно и не путать линии.
+  static final Material _debugLineMaterial = UnlitMaterial()
+    ..baseColorFactor = vm.Vector4(1.0, 0.15, 0.85, 1.0);
+
+  /// Отладочная визуализация — ровно тот отрезок ребра графа (от узла до
+  /// узла, на высоте [_eyeHeight]), который проверяет [_isEdgePassable].
+  /// Рисуется именно ребро, а не линия от текущей позиции пешехода: смысл
+  /// в том, чтобы увидеть глазами, что именно тестирует рейкаст, когда
+  /// пешеход всё равно проходит сквозь стену — предыдущие два фикса (кэш
+  /// блокировки, фильтр типов highway) не помогли, и остаётся непроверенным,
+  /// попадает ли рейкаст в геометрию вообще (см. BUGS.md). Включается извне
+  /// (см. Game.debugShowRoadGraph), не часть обычного игрового рендера.
+  Node buildDebugTargetLinesNode() => Node();
+
+  /// Рёбра, по которым построен текущий debug-меш — чтобы не пересобирать его
+  /// каждый кадр: конструктор LineSegmentsGeometry заводит device buffer на
+  /// GPU, и покадровая пересборка = 60 новых буферов в секунду на ровном
+  /// месте. Набор рёбер меняется редко (только когда пешеход дошёл до узла и
+  /// выбрал новую цель), так что сравнение состава — точный признак того,
+  /// что меш пора перестроить.
+  final List<String> _debugFromIds = [];
+  final List<String> _debugToIds = [];
+
+  void updateDebugTargetLines(Node node) {
+    if (!_debugEdgesChanged()) return;
+
+    _debugFromIds.clear();
+    _debugToIds.clear();
+    final positions = Float32List(_pedestrians.length * 6);
+    var i = 0;
+    for (final pedestrian in _pedestrians) {
+      _debugFromIds.add(pedestrian.currentNodeId);
+      _debugToIds.add(pedestrian.targetNodeId);
+      final from = graph.nodes[pedestrian.currentNodeId];
+      final to = graph.nodes[pedestrian.targetNodeId];
+      if (from == null || to == null) continue;
+      positions[i++] = from.x;
+      positions[i++] = _eyeHeight;
+      positions[i++] = from.z;
+      positions[i++] = to.x;
+      positions[i++] = _eyeHeight;
+      positions[i++] = to.z;
+    }
+    node.mesh = i == 0
+        ? null
+        : Mesh(
+            LineSegmentsGeometry(LineSegmentData(positions: positions.sublist(0, i)), width: 0.2),
+            _debugLineMaterial,
+          );
+  }
+
+  bool _debugEdgesChanged() {
+    if (_debugFromIds.length != _pedestrians.length) return true;
+    for (var i = 0; i < _pedestrians.length; i++) {
+      if (_debugFromIds[i] != _pedestrians[i].currentNodeId ||
+          _debugToIds[i] != _pedestrians[i].targetNodeId) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   /// Зовётся каждый кадр из Game.tick(). Первый вызов лениво спавнит
   /// начальную популяцию вокруг [trackedPosition] — раньше нельзя, узлы

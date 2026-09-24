@@ -33,8 +33,16 @@ class DistrictStreamer {
 
   /// Пересчитывает нужный набор чанков и догружает/выгружает разницу.
   /// Дёшево звать каждый кадр — без изменения позиции ничего не делает
-  /// (манифест — не больше нескольких десятков ячеек).
-  void updateAroundPosition(vm.Vector3 worldPosition) {
+  /// (манифест — не больше нескольких десятков ячеек). Возвращает Future,
+  /// который завершается, когда чанки, запрошенные ИМЕННО этим вызовом,
+  /// реально попали в сцену — обычный per-tick вызов (см. Game.tick())
+  /// его не ждёт (fire-and-forget, как и раньше), а самый первый вызов из
+  /// Game.load() ждёт явно: раньше геометрия здания могла физически не
+  /// успеть прогрузиться к моменту, когда пешеходы на первом кадре уже
+  /// выбирали себе первую цель и рейкастили edge на проходимость — путь
+  /// оказывался ошибочно "открыт" просто потому, что дома ещё не было в
+  /// сцене (см. PedestrianSystem._isEdgePassable, BUGS.md).
+  Future<void> updateAroundPosition(vm.Vector3 worldPosition) async {
     final wanted = _wantedChunkIds(worldPosition);
 
     for (final id in _loaded.keys.toList()) {
@@ -44,37 +52,41 @@ class DistrictStreamer {
       }
     }
 
+    final pending = <Future<void>>[];
     for (final chunk in manifest.cells) {
       if (!wanted.contains(chunk.id)) continue;
       if (_loaded.containsKey(chunk.id) || _loading.contains(chunk.id)) continue;
 
       _loading.add(chunk.id);
-      loadDistrictChunk(chunk).then((node) {
-        _loading.remove(chunk.id);
-        _loaded[chunk.id] = node;
-        // Здания/дороги внутри чанка не меняются, пока он смонтирован
-        // (снимается тем же scene.remove(), что и добавлялся) — безопасный
-        // случай для shadowStatic: движок кеширует тень вместо перекодирования
-        // всех caster'ов заново каждый кадр (см. flutter_scene-performance
-        // skill). Не наследуется детьми — ставим на каждый меш-узел отдельно.
-        for (final meshNode in node.meshNodes) {
-          meshNode.shadowStatic = true;
-        }
-        scene.add(node);
+      pending.add(
+        loadDistrictChunk(chunk).then((node) {
+          _loading.remove(chunk.id);
+          _loaded[chunk.id] = node;
+          // Здания/дороги внутри чанка не меняются, пока он смонтирован
+          // (снимается тем же scene.remove(), что и добавлялся) — безопасный
+          // случай для shadowStatic: движок кеширует тень вместо перекодирования
+          // всех caster'ов заново каждый кадр (см. flutter_scene-performance
+          // skill). Не наследуется детьми — ставим на каждый меш-узел отдельно.
+          for (final meshNode in node.meshNodes) {
+            meshNode.shadowStatic = true;
+          }
+          scene.add(node);
 
-        if (_vegetationScattered.add(chunk.id)) {
-          scatterTreesForChunk(
-            vegetation: vegetation,
-            chunkRoot: node,
-            cellCenter: vm.Vector2(
-              (chunk.cellX + 0.5) * manifest.cellSizeMeters,
-              (chunk.cellZ + 0.5) * manifest.cellSizeMeters,
-            ),
-            cellSizeMeters: manifest.cellSizeMeters,
-          );
-        }
-      });
+          if (_vegetationScattered.add(chunk.id)) {
+            scatterTreesForChunk(
+              vegetation: vegetation,
+              chunkRoot: node,
+              cellCenter: vm.Vector2(
+                (chunk.cellX + 0.5) * manifest.cellSizeMeters,
+                (chunk.cellZ + 0.5) * manifest.cellSizeMeters,
+              ),
+              cellSizeMeters: manifest.cellSizeMeters,
+            );
+          }
+        }),
+      );
     }
+    if (pending.isNotEmpty) await Future.wait(pending);
   }
 
   Set<String> _wantedChunkIds(vm.Vector3 pos) {

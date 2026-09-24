@@ -1,0 +1,47 @@
+{
+  "comment": "Пресеты качества (ТЗ, раздел 23). high намеренно повторяет то, как игра выглядела до появления этого файла — это базовая линия для замеров, менять её значения нельзя, не перемерив заново. low/medium — заготовки под замер на слабом железе, их числа подобраны на глаз и уточняются по результатам профилирования, а не наоборот.",
+  "defaultPreset": "high",
+  "presets": {
+    "low": {
+      "comment": "Для слабых Android (RMX5303: Unisoc ums9230 + Mali-G57). Числа подтверждены замером 19.09.2026: этот набор даёт ~36 FPS (28.1 мс, ui 10.3, raster 14.0) с землёй, деревьями и ТЕНЯМИ. Тени здесь включены намеренно: при renderScale 0.5 они стоят ~6 мс, а выключать их ради этого — заметная потеря картинки за копейки. AO выключен (14 мс при полном разрешении), но помнить: вместе с AO уходит depth prepass и early-Z (в движке wantDepthPrepass завязан на ambientOcclusion.enabled), так что на сценах с большим overdraw это может выйти в минус.",
+      "renderScale": 0.5,
+      "antiAliasing": "none",
+      "shadowsEnabled": true,
+      "shadowCascadeCount": 2,
+      "shadowMaxDistance": 80.0,
+      "shadowMapResolution": 512,
+      "ambientOcclusionEnabled": false,
+      "bloomEnabled": false,
+      "drawDistanceMeters": 350.0,
+      "pedestrianPopulation": 8,
+      "maxTrees": 80
+    },
+    "medium": {
+      "renderScale": 0.75,
+      "antiAliasing": "fxaa",
+      "shadowsEnabled": true,
+      "shadowCascadeCount": 2,
+      "shadowMaxDistance": 100.0,
+      "shadowMapResolution": 512,
+      "ambientOcclusionEnabled": true,
+      "bloomEnabled": false,
+      "drawDistanceMeters": 500.0,
+      "pedestrianPopulation": 12,
+      "maxTrees": 150
+    },
+    "high": {
+      "comment": "Максимальное качество для сильных устройств (iPhone 13 держит на этом 60 FPS). shadowMapResolution понижен до 512 по результатам замера: разница в чёткости теней на мобильном экране не читается, а стоит 1024 лишние 8 мс raster. Каскады оставлены 4 — на замере их число не влияло ни на что, так что пусть будет качество.",
+      "renderScale": 1.0,
+      "antiAliasing": "auto",
+      "shadowsEnabled": true,
+      "shadowCascadeCount": 4,
+      "shadowMaxDistance": 150.0,
+      "shadowMapResolution": 512,
+      "ambientOcclusionEnabled": true,
+      "bloomEnabled": true,
+      "drawDistanceMeters": 1000.0,
+      "pedestrianPopulation": 16,
+      "maxTrees": 220
+    }
+  }
+}
