@@ -80,7 +80,14 @@ class PoliceSystem {
       final carPos = unit.vehicle.node.globalTransform.getTranslation();
 
       unit.repathTimer -= dt;
-      if (unit.path.isEmpty && unit.repathTimer <= 0) {
+      // ИЛИ, не И: путь пуст — строим немедленно, иначе перестраиваем раз в
+      // repathIntervalSeconds вслед за уехавшим игроком. С `&&` перерасчёт
+      // случался только после того, как машина израсходует весь старый
+      // маршрут — то есть патруль ехал туда, где игрок был в момент первого
+      // расчёта, и оторваться от погони было слишком легко. Таймер взводится
+      // внутри условия (в том числе когда _repath не нашёл путь) — иначе при
+      // недостижимой цели Дейкстра считалась бы каждый кадр.
+      if (unit.path.isEmpty || unit.repathTimer <= 0) {
         _repath(unit, carPos, targetPosition);
         unit.repathTimer = repathIntervalSeconds;
       }
