@@ -11,7 +11,7 @@ import 'package:flutter_scene/scene.dart';
 /// - рендерные (renderScale, AA, тени, AO/bloom, дальность) — [applyToScene]
 ///   меняет их на живой сцене, что и позволяет снимать A/B-замеры без
 ///   пересборки;
-/// - мировые ([pedestrianPopulation], [maxTrees]) — читаются один раз при
+/// - мировые ([pedestrianPopulation], [trafficPopulation], [maxTrees]) — читаются один раз при
 ///   Game.load(), потому что меняют состав уже созданных систем.
 class QualitySettings {
   const QualitySettings({
@@ -26,6 +26,7 @@ class QualitySettings {
     required this.bloomEnabled,
     required this.drawDistanceMeters,
     required this.pedestrianPopulation,
+    this.trafficPopulation = 8,
     required this.maxTrees,
   });
 
@@ -43,6 +44,8 @@ class QualitySettings {
     bloomEnabled: json['bloomEnabled'] as bool,
     drawDistanceMeters: (json['drawDistanceMeters'] as num).toDouble(),
     pedestrianPopulation: json['pedestrianPopulation'] as int,
+    // Необязательное: конфиги до появления трафика читаются как 8.
+    trafficPopulation: json['trafficPopulation'] as int? ?? 8,
     maxTrees: json['maxTrees'] as int,
   );
 
@@ -67,6 +70,10 @@ class QualitySettings {
   final double drawDistanceMeters;
 
   final int pedestrianPopulation;
+
+  /// Машин фонового трафика (lib/traffic/) — каждая свой узел с ~10 мешами,
+  /// так что на слабом железе их меньше.
+  final int trafficPopulation;
   final int maxTrees;
 
   /// Для debug-панели: снять один фактор, не трогая остальные. Пресеты
@@ -91,6 +98,7 @@ class QualitySettings {
     bloomEnabled: bloomEnabled ?? this.bloomEnabled,
     drawDistanceMeters: drawDistanceMeters,
     pedestrianPopulation: pedestrianPopulation,
+    trafficPopulation: trafficPopulation,
     maxTrees: maxTrees,
   );
 

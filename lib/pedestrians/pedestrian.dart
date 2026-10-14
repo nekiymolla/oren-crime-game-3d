@@ -40,7 +40,7 @@ class Pedestrian {
   /// возвращается сюда, а уже потом идёт к цели. Иначе он пошёл бы к цели
   /// по прямой из места падения — в стороне от ребра, а гарантия "сквозь
   /// дома не ходит" держится именно на том, что пешеход идёт по рёбрам
-  /// (см. tools/osm_pipeline/check_pedestrian_graph.mjs).
+  /// (см. tools/osm_pipeline/check_road_graph.mjs).
   vm.Vector3? returnPoint;
 
   bool get isKnockedDown => knockedDownSeconds > 0.0;

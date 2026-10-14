@@ -42,6 +42,21 @@ class VehicleDimensions {
   final double wheelWidth;
   final double cargoBedLength;
   final vm.Vector4 paintColor;
+
+  /// Тот же силуэт другого цвета — для разноцветного трафика.
+  VehicleDimensions withPaint(vm.Vector4 color) => VehicleDimensions(
+    bodyWidth: bodyWidth,
+    chassisHeight: chassisHeight,
+    bodyLength: bodyLength,
+    cabinHeight: cabinHeight,
+    cabinLength: cabinLength,
+    cabinWidth: cabinWidth,
+    cabinZOffset: cabinZOffset,
+    wheelRadius: wheelRadius,
+    wheelWidth: wheelWidth,
+    cargoBedLength: cargoBedLength,
+    paintColor: color,
+  );
 }
 
 /// Готовые силуэты — три разных типа машины на одной и той же процедурной

@@ -1,5 +1,5 @@
-// Проверяет, что пешеходные рёбра дорожного графа не проходят сквозь
-// здания в РЕАЛЬНОЙ 3D-геометрии чанков (то, что видит игрок), а не в
+// Проверяет, что ни пешеходы, ни фоновый трафик, двигаясь по дорожному
+// графу, не проходят сквозь здания в РЕАЛЬНОЙ 3D-геометрии чанков (то, что видит игрок), а не в
 // контурах OSM: здания рисует osm2world, и сравнивать надо с ним.
 //
 // Пешеход ходит строго по прямой между узлами графа (lib/pedestrians/
@@ -11,7 +11,11 @@
 // Вызывается из convert_to_glb.sh после сборки чанков и графа — чтобы
 // пересборка карты не вернула баг молча. Код выхода 1, если нашлись рёбра.
 //
-// Использование: node check_pedestrian_graph.mjs <chunks_dir> <road_graph.json>
+// Трафик (lib/traffic/traffic_car.dart) ездит по правой полосе — со
+// сдвигом trafficLaneOffset от оси, поэтому для него проверяется полоса
+// целиком (оба борта кузова) в каждом разрешённом направлении ребра.
+//
+// Использование: node check_road_graph.mjs <chunks_dir> <road_graph.json>
 
 import fs from 'fs';
 import { NodeIO } from '@gltf-transform/core';
@@ -31,12 +35,19 @@ const ROOF_MAX_HEIGHT = 100;
 // Полуширина капсулы пешехода (PedestrianSystem._radius) — проверяем не
 // только ось ребра, но и по бокам, иначе капсула торчала бы из стены.
 const BODY_RADIUS = 0.3;
+// Те же, что trafficHighwayTypes / trafficLaneOffset в
+// lib/traffic/traffic_car.dart — при изменении менять в обоих местах.
+const TRAFFIC_HIGHWAYS = new Set([
+  'residential', 'unclassified', 'tertiary', 'secondary', 'primary', 'living_street',
+]);
+const TRAFFIC_LANE_OFFSET = 1.5;
+const CAR_HALF_WIDTH = 0.9;
 const SAMPLE_STEP = 0.5;
 const GRID_CELL = 4;
 
 const [chunksDir, graphPath] = process.argv.slice(2);
 if (!chunksDir || !graphPath) {
-  console.error('Использование: node check_pedestrian_graph.mjs <chunks_dir> <road_graph.json>');
+  console.error('Использование: node check_road_graph.mjs <chunks_dir> <road_graph.json>');
   process.exit(2);
 }
 
@@ -106,33 +117,65 @@ function topHeightAt(x, z) {
 const graph = JSON.parse(fs.readFileSync(graphPath, 'utf8'));
 const nodes = Object.fromEntries(graph.nodes.map((n) => [n.id, n]));
 
-let checked = 0;
-const blocked = [];
-for (const edge of graph.edges) {
-  if (!PEDESTRIAN_HIGHWAYS.has(edge.highway)) continue;
-  checked++;
-  const a = nodes[edge.from];
-  const b = nodes[edge.to];
+// Первое место на прямой a -> b (со смещениями [offsets] вправо от
+// направления), где над дорогой оказывается дом; null — чисто.
+function findRoofAlong(a, b, offsets) {
   const length = Math.hypot(b.x - a.x, b.z - a.z);
-  if (length < 1e-6) continue;
+  if (length < 1e-6) return null;
   const ux = (b.x - a.x) / length;
   const uz = (b.z - a.z) / length;
-
-  search: for (let s = 0; s <= length; s += SAMPLE_STEP) {
-    for (const side of [-BODY_RADIUS, 0, BODY_RADIUS]) {
-      const x = a.x + ux * s - uz * side;
-      const z = a.z + uz * s + ux * side;
+  for (let s = 0; s <= length; s += SAMPLE_STEP) {
+    for (const offset of offsets) {
+      // Вправо от направления (ux, uz) в координатах игры — (-uz, ux).
+      const x = a.x + ux * s - uz * offset;
+      const z = a.z + uz * s + ux * offset;
       const h = topHeightAt(x, z);
       if (h !== null && h > ROOF_MIN_HEIGHT && h < ROOF_MAX_HEIGHT) {
-        blocked.push({ highway: edge.highway, from: edge.from, to: edge.to, x: +x.toFixed(1), z: +z.toFixed(1), roof: +h.toFixed(1) });
-        break search;
+        return { x: +x.toFixed(1), z: +z.toFixed(1), roof: +h.toFixed(1) };
       }
     }
   }
+  return null;
 }
 
-console.log(`Пешеходный граф: проверено ${checked} рёбер по ${triangles.length} треугольникам, сквозь здания: ${blocked.length}`);
-if (blocked.length > 0) {
-  for (const b of blocked.slice(0, 20)) console.log('  ', JSON.stringify(b));
-  process.exit(1);
+let failed = false;
+
+// Пешеходы: ось ребра плюс ширина капсулы в обе стороны.
+{
+  let checked = 0;
+  const blocked = [];
+  for (const edge of graph.edges) {
+    if (!PEDESTRIAN_HIGHWAYS.has(edge.highway)) continue;
+    checked++;
+    const hit = findRoofAlong(nodes[edge.from], nodes[edge.to], [-BODY_RADIUS, 0, BODY_RADIUS]);
+    if (hit) blocked.push({ highway: edge.highway, from: edge.from, to: edge.to, ...hit });
+  }
+  report(`Пешеходы: проверено ${checked} рёбер`, blocked);
 }
+
+// Трафик: правая полоса в каждом разрешённом направлении (на oneway — по
+// оси, как и в игре), оба борта кузова.
+{
+  let checked = 0;
+  const blocked = [];
+  for (const edge of graph.edges) {
+    if (!TRAFFIC_HIGHWAYS.has(edge.highway)) continue;
+    const center = edge.oneway ? 0 : TRAFFIC_LANE_OFFSET;
+    const offsets = [center - CAR_HALF_WIDTH, center, center + CAR_HALF_WIDTH];
+    const directions = edge.oneway ? [[edge.from, edge.to]] : [[edge.from, edge.to], [edge.to, edge.from]];
+    for (const [from, to] of directions) {
+      checked++;
+      const hit = findRoofAlong(nodes[from], nodes[to], offsets);
+      if (hit) blocked.push({ highway: edge.highway, from, to, ...hit });
+    }
+  }
+  report(`Трафик: проверено ${checked} полос`, blocked);
+}
+
+function report(title, blocked) {
+  console.log(`${title} по ${triangles.length} треугольникам, сквозь здания: ${blocked.length}`);
+  for (const b of blocked.slice(0, 20)) console.log('  ', JSON.stringify(b));
+  if (blocked.length > 0) failed = true;
+}
+
+if (failed) process.exit(1);

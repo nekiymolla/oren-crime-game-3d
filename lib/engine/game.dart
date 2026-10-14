@@ -11,6 +11,8 @@ import '../player/character_controller_component.dart';
 import '../player/player_input_bridge_component.dart';
 import '../police/arrest_state.dart';
 import '../police/police_system.dart';
+import '../traffic/traffic_car.dart';
+import '../traffic/traffic_system.dart';
 import '../police/wanted_state.dart';
 import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
@@ -41,6 +43,7 @@ class Game {
   late final DistrictStreamer districtStreamer;
   late final PedestrianSystem pedestrians;
   late final PoliceSystem policeSystem;
+  late final TrafficSystem traffic;
   late final WorldConfig worldConfig;
   final WantedSystem wantedSystem = WantedSystem();
 
@@ -151,6 +154,11 @@ class Game {
       scene.add(_pedestrianDebugLinesNode!);
     }
     policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene);
+    traffic = TrafficSystem(
+      network: TrafficNetwork(roadGraph),
+      scene: scene,
+      population: quality.trafficPopulation,
+    );
 
     districtStreamer = DistrictStreamer(
       scene: scene,
@@ -214,6 +222,7 @@ class Game {
     // приходят колбэком: их набор меняется по звёздам розыска.
     collisionField.addColliderSource(() => [vehicle.node, parkedHatchback, parkedPickup]);
     collisionField.addColliderSource(() => policeSystem.unitNodes);
+    collisionField.addColliderSource(() => traffic.carNodes);
 
     final cameraComponent = CameraComponent(
       projection: PerspectiveProjection(far: quality.drawDistanceMeters),
@@ -456,11 +465,31 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
+    traffic.update(deltaSeconds, trackedPosition, external: _trafficObstacles(isDriving));
+
     final caught = policeSystem.update(deltaSeconds, trackedPosition);
     if (caught) _handleArrest();
 
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
+    }
+  }
+
+  /// То, перед чем тормозит трафик помимо друг друга: игрок (пешком или
+  /// его машина), полиция, пешеходы. Радиусы — полуширины в плане.
+  Iterable<TrafficObstacle> _trafficObstacles(bool isDriving) sync* {
+    if (isDriving) {
+      yield (position: vehicle.node.globalTransform.getTranslation(), radius: 1.0);
+    } else {
+      yield (position: playerNode.globalTransform.getTranslation(), radius: _playerCapsuleRadius);
+      // Пустая машина игрока тоже стоит где-то — возможно, посреди дороги.
+      yield (position: vehicle.node.globalTransform.getTranslation(), radius: 1.0);
+    }
+    for (final node in policeSystem.unitNodes) {
+      yield (position: node.globalTransform.getTranslation(), radius: 1.0);
+    }
+    for (final position in pedestrians.positions) {
+      yield (position: position, radius: PedestrianSystem.bodyRadius);
     }
   }
 

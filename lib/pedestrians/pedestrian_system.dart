@@ -90,6 +90,12 @@ class PedestrianSystem {
 
   Node buildNode() => Node()..addComponent(InstancedMeshComponent(bodies));
 
+  /// Позиции пешеходов — перед ними тормозит трафик (см. lib/traffic/).
+  Iterable<vm.Vector3> get positions => _pedestrians.map((p) => p.position);
+
+  /// Радиус капсулы пешехода — для препятствий трафика.
+  static const double bodyRadius = _radius;
+
   /// Материал для [buildDebugTargetLinesNode] — ярко-розовый, не пересекается
   /// с жёлтыми линиями дорожного графа (см. road_graph.dart), чтобы оба
   /// debug-слоя можно было включить одновременно и не путать линии.
