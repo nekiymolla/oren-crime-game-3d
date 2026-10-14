@@ -45,13 +45,13 @@ void main() {
     for (var i = 0; i < 4000; i++) {
       // Только из не-снежной погоды: из снегопада снег продолжается в любой
       // сезон, вопрос — как часто он НАЧИНАЕТСЯ.
-      const start = [WeatherKind.clear, WeatherKind.cloudy, WeatherKind.overcast, WeatherKind.rain, WeatherKind.fog];
+      const start = [WeatherKind.clear, WeatherKind.cloudy, WeatherKind.overcast, WeatherKind.drizzle, WeatherKind.fog];
       final current = start[random.nextInt(start.length)];
       final october = nextWeather(current, 287, random);
       if (october == WeatherKind.heat) octoberHeat++;
-      if (october == WeatherKind.snow || october == WeatherKind.blizzard) octoberSnow++;
+      if (october == WeatherKind.lightSnow || october == WeatherKind.snow || october == WeatherKind.blizzard) octoberSnow++;
       final january = nextWeather(current, 15, random);
-      if (january == WeatherKind.snow || january == WeatherKind.blizzard) winterSnow++;
+      if (january == WeatherKind.lightSnow || january == WeatherKind.snow || january == WeatherKind.blizzard) winterSnow++;
     }
     expect(octoberHeat, 0);
     expect(winterSnow, greaterThan(octoberSnow * 4));
@@ -74,5 +74,30 @@ void main() {
       seen.add(weather.kind);
     }
     expect(seen.length, greaterThan(2));
+  });
+
+  test('осадки — лестницей: туман растёт с силой, слабые — без тумана', () {
+    final clearFog = weatherPresets[WeatherKind.clear]!.fogDensity;
+    for (final ladder in [
+      [WeatherKind.drizzle, WeatherKind.rain, WeatherKind.heavyRain, WeatherKind.storm],
+      [WeatherKind.lightSnow, WeatherKind.snow, WeatherKind.blizzard],
+    ]) {
+      expect(weatherPresets[ladder.first]!.fogDensity, lessThan(clearFog), reason: ladder.first.label);
+      for (var i = 1; i < ladder.length; i++) {
+        final weaker = weatherPresets[ladder[i - 1]]!;
+        final stronger = weatherPresets[ladder[i]]!;
+        expect(stronger.fogDensity, greaterThan(weaker.fogDensity), reason: ladder[i].label);
+        expect(stronger.rain + stronger.snow, greaterThan(weaker.rain + weaker.snow), reason: ladder[i].label);
+      }
+    }
+  });
+
+  test('дождь меняется на одну ступень, без прыжков', () {
+    final random = math.Random(4);
+    for (var i = 0; i < 2000; i++) {
+      expect(nextWeather(WeatherKind.drizzle, 287, random), isNot(anyOf(WeatherKind.heavyRain, WeatherKind.storm)));
+      expect(nextWeather(WeatherKind.storm, 287, random), isNot(anyOf(WeatherKind.drizzle, WeatherKind.clear)));
+      expect(nextWeather(WeatherKind.clear, 287, random), isNot(anyOf(WeatherKind.rain, WeatherKind.heavyRain)));
+    }
   });
 }

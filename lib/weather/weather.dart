@@ -8,8 +8,14 @@ enum WeatherKind {
   cloudy('облачно'),
   overcast('пасмурно'),
   fog('туман'),
+  // Осадки — лестницей по силе: туман растёт вместе с ней, слабый дождь
+  // и слабый снег — совсем без тумана (раньше дождь был один и сразу
+  // затягивал всё серой пеленой).
+  drizzle('слабый дождь'),
   rain('дождь'),
+  heavyRain('ливень'),
   storm('гроза'),
+  lightSnow('слабый снег'),
   snow('снег'),
   blizzard('метель'),
   heat('жара');
@@ -114,39 +120,69 @@ const Map<WeatherKind, WeatherParams> weatherPresets = {
     saturation: -0.25,
     contrast: -0.1,
   ),
+  // Слабые осадки — тумана меньше даже фоновой дымки ясной погоды: под
+  // серым небом та читалась как пелена.
+  WeatherKind.drizzle: WeatherParams(
+    cloudCover: 0.65,
+    fogDensity: 0.0007,
+    rain: 0.3,
+    wind: 0.2,
+    sunRays: 0.2,
+    saturation: -0.08,
+    temperature: -0.03,
+  ),
   WeatherKind.rain: WeatherParams(
+    cloudCover: 0.85,
+    fogDensity: 0.0028,
+    rain: 0.6,
+    wind: 0.35,
+    sunRays: 0.0,
+    saturation: -0.14,
+    temperature: -0.06,
+  ),
+  WeatherKind.heavyRain: WeatherParams(
     cloudCover: 0.95,
-    fogDensity: 0.008,
-    rain: 0.7,
-    wind: 0.4,
+    fogDensity: 0.0055,
+    rain: 0.9,
+    wind: 0.55,
     sunRays: 0.0,
     saturation: -0.2,
     temperature: -0.08,
   ),
   WeatherKind.storm: WeatherParams(
     cloudCover: 1.0,
-    fogDensity: 0.018,
+    fogDensity: 0.0075,
     rain: 1.0,
     wind: 0.9,
     lightning: 1.0,
     sunRays: 0.0,
-    saturation: -0.25,
+    saturation: -0.22,
     contrast: 0.1,
     temperature: -0.12,
   ),
+  WeatherKind.lightSnow: WeatherParams(
+    cloudCover: 0.7,
+    fogDensity: 0.0007,
+    snow: 0.3,
+    wind: 0.1,
+    sunRays: 0.15,
+    saturation: -0.1,
+    temperature: -0.1,
+    snowCover: 0.45,
+  ),
   WeatherKind.snow: WeatherParams(
     cloudCover: 0.9,
-    fogDensity: 0.009,
+    fogDensity: 0.004,
     snow: 0.6,
     wind: 0.2,
     sunRays: 0.0,
-    saturation: -0.2,
+    saturation: -0.18,
     temperature: -0.15,
     snowCover: 0.85,
   ),
   WeatherKind.blizzard: WeatherParams(
     cloudCover: 1.0,
-    fogDensity: 0.045,
+    fogDensity: 0.03,
     snow: 1.0,
     wind: 1.0,
     sunRays: 0.0,
@@ -261,30 +297,44 @@ WeatherKind nextWeather(WeatherKind current, int dayOfYear, math.Random random) 
     case WeatherKind.cloudy:
       add(WeatherKind.partlyCloudy, 2);
       add(WeatherKind.overcast, 2);
-      add(WeatherKind.rain, season == Season.winter ? 0 : 1);
-      add(WeatherKind.snow, season == Season.winter ? 2 : 0);
+      add(WeatherKind.drizzle, season == Season.winter ? 0 : 1);
+      add(WeatherKind.lightSnow, season == Season.winter ? 2 : 0);
     case WeatherKind.overcast:
       add(WeatherKind.cloudy, 2);
-      add(WeatherKind.rain, season == Season.winter ? 0 : 3);
-      add(WeatherKind.snow, season == Season.winter ? 3 : (season == Season.autumn ? 0.3 : 0));
+      add(WeatherKind.drizzle, season == Season.winter ? 0 : 2);
+      add(WeatherKind.rain, season == Season.winter ? 0 : 1);
+      add(WeatherKind.lightSnow, season == Season.winter ? 3 : (season == Season.autumn ? 0.3 : 0));
       add(WeatherKind.fog, season == Season.summer ? 0.3 : 1);
     case WeatherKind.fog:
       add(WeatherKind.overcast, 2);
       add(WeatherKind.cloudy, 2);
-    case WeatherKind.rain:
-      add(WeatherKind.overcast, 3);
-      add(WeatherKind.storm, season == Season.summer ? 2 : 0.5);
-      add(WeatherKind.rain, 1);
-    case WeatherKind.storm:
-      add(WeatherKind.rain, 3);
-      add(WeatherKind.overcast, 1);
-    case WeatherKind.snow:
+    // Дождь — вверх и вниз по лестнице на одну ступень, без прыжков.
+    case WeatherKind.drizzle:
       add(WeatherKind.overcast, 2);
+      add(WeatherKind.cloudy, 1);
+      add(WeatherKind.rain, 2);
+      add(WeatherKind.drizzle, 1);
+    case WeatherKind.rain:
+      add(WeatherKind.drizzle, 2);
+      add(WeatherKind.heavyRain, season == Season.summer ? 2 : 1);
+      add(WeatherKind.rain, 1);
+    case WeatherKind.heavyRain:
+      add(WeatherKind.rain, 3);
+      add(WeatherKind.storm, season == Season.summer ? 2 : 0.4);
+    case WeatherKind.storm:
+      add(WeatherKind.heavyRain, 3);
+      add(WeatherKind.rain, 1);
+    case WeatherKind.lightSnow:
+      add(WeatherKind.overcast, 2);
+      add(WeatherKind.snow, season == Season.winter ? 2 : 0.3);
+      add(WeatherKind.lightSnow, 1);
+    case WeatherKind.snow:
+      add(WeatherKind.lightSnow, 2);
       add(WeatherKind.blizzard, season == Season.winter ? 1 : 0.2);
       add(WeatherKind.snow, 1);
     case WeatherKind.blizzard:
       add(WeatherKind.snow, 3);
-      add(WeatherKind.overcast, 1);
+      add(WeatherKind.lightSnow, 1);
   }
 
   final total = weights.values.fold(0.0, (a, b) => a + b);
