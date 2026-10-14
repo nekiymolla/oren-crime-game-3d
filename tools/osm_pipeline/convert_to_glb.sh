@@ -65,4 +65,9 @@ rm "$RECENTERED_FILE"
 python3 "$SCRIPT_DIR/build_road_graph.py" "$INPUT_FILE" "$CALIBRATION_FILE" \
   "$SCRIPT_DIR/../../assets/data/road_graph.json"
 
+# Пешеходы ходят по рёбрам графа по прямой — ни одно не должно проходить
+# сквозь здания в 3D-геометрии (баг "пешеходы сквозь стены", см. BUGS.md).
+node "$SCRIPT_DIR/check_pedestrian_graph.mjs" "$CHUNKS_DIR" \
+  "$SCRIPT_DIR/../../assets/data/road_graph.json"
+
 echo "Готово: $CHUNKS_DIR ($(du -sh "$CHUNKS_DIR" | cut -f1))"
