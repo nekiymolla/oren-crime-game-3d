@@ -21,6 +21,8 @@ RoadGraph _lineGraph() {
 }
 
 void main() {
+  knockdownTests();
+
   test('buildPedestrianAdjacency строит связи в обе стороны', () {
     final adjacency = buildPedestrianAdjacency(_lineGraph());
     expect(adjacency['a'], ['b']);
@@ -86,5 +88,53 @@ void main() {
 
     expect(pedestrian.currentNodeId, 'a');
     expect(pedestrian.targetNodeId, 'b');
+  });
+}
+
+void _advance(Pedestrian pedestrian, RoadGraph graph, double seconds) {
+  final adjacency = buildPedestrianAdjacency(graph);
+  final random = Random(1);
+  for (var i = 0; i < (seconds * 60).round(); i++) {
+    advancePedestrian(pedestrian, graph, adjacency, dt: 1 / 60, speed: 1.3, random: random);
+  }
+}
+
+void knockdownTests() {
+  test('сбитый пешеход отлетает от машины и лежит, не идя к цели', () {
+    final graph = _lineGraph();
+    final pedestrian = Pedestrian(position: vm.Vector3(5, 0, 0), currentNodeId: 'a', targetNodeId: 'b');
+    // Машина сбоку (с -Z) на скорости 15 м/с.
+    pedestrian.knockDown(vm.Vector3(5, 0, -1), 15.0, lieSeconds: 3.0);
+    _advance(pedestrian, graph, 2.0);
+    expect(pedestrian.isKnockedDown, isTrue);
+    expect(pedestrian.position.z, greaterThan(0.5)); // отлетел от машины
+    expect(pedestrian.position.x, closeTo(5, 1e-6)); // к цели не шёл
+  });
+
+  test('встав, сначала возвращается на ребро, потом идёт к цели', () {
+    final graph = _lineGraph();
+    final pedestrian = Pedestrian(position: vm.Vector3(5, 0, 0), currentNodeId: 'a', targetNodeId: 'b');
+    pedestrian.knockDown(vm.Vector3(5, 0, -1), 15.0, lieSeconds: 1.0);
+    _advance(pedestrian, graph, 1.0);
+    final landedZ = pedestrian.position.z;
+    expect(landedZ, greaterThan(0.5));
+
+    // Возврат на ребро идёт строго обратно, по x не смещаясь.
+    _advance(pedestrian, graph, 0.3);
+    expect(pedestrian.position.z, lessThan(landedZ));
+    expect(pedestrian.position.x, closeTo(5, 1e-6));
+
+    _advance(pedestrian, graph, 3.0);
+    expect(pedestrian.returnPoint, isNull);
+    expect(pedestrian.position.z, closeTo(0, 1e-6));
+    expect(pedestrian.position.x, greaterThan(5.5)); // пошёл дальше к b
+  });
+
+  test('повторный удар лежачего не сбрасывает точку возврата на ребро', () {
+    final pedestrian = Pedestrian(position: vm.Vector3(5, 0, 0), currentNodeId: 'a', targetNodeId: 'b');
+    pedestrian.knockDown(vm.Vector3(5, 0, -1), 15.0);
+    pedestrian.position = vm.Vector3(5, 0, 2);
+    pedestrian.knockDown(vm.Vector3(5, 0, 1), 15.0);
+    expect(pedestrian.returnPoint!.z, closeTo(0, 1e-6));
   });
 }

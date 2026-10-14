@@ -29,7 +29,42 @@ class Pedestrian {
   /// Индекс инстанса в общем InstancedMesh (см. PedestrianSystem) — не
   /// логика, просто чтобы рендеру было куда писать обновлённый transform.
   int instanceIndex = -1;
+
+  /// Сколько ещё секунд лежит сбитый машиной (0 — на ногах).
+  double knockedDownSeconds = 0.0;
+
+  /// Скорость отлёта после удара, гасится трением (см. [advancePedestrian]).
+  vm.Vector3 knockbackVelocity = vm.Vector3.zero();
+
+  /// Точка на ребре графа, где пешехода сбили: встав, он сперва
+  /// возвращается сюда, а уже потом идёт к цели. Иначе он пошёл бы к цели
+  /// по прямой из места падения — в стороне от ребра, а гарантия "сквозь
+  /// дома не ходит" держится именно на том, что пешеход идёт по рёбрам
+  /// (см. tools/osm_pipeline/check_pedestrian_graph.mjs).
+  vm.Vector3? returnPoint;
+
+  bool get isKnockedDown => knockedDownSeconds > 0.0;
+
+  /// Удар машиной: отлетает от [impactFrom] (центр машины) со скоростью,
+  /// растущей со скоростью машины [impactSpeed], и лежит [lieSeconds].
+  void knockDown(
+    vm.Vector3 impactFrom,
+    double impactSpeed, {
+    double lieSeconds = 6.0,
+  }) {
+    returnPoint ??= position.clone();
+    knockedDownSeconds = lieSeconds;
+    final away = vm.Vector3(position.x - impactFrom.x, 0, position.z - impactFrom.z);
+    if (away.length2 < 1e-6) away.setValues(math.sin(yaw), 0, math.cos(yaw));
+    away.normalize();
+    knockbackVelocity = away * math.min(impactSpeed * 0.4, 6.0);
+    yaw = math.atan2(away.x, away.z);
+  }
 }
+
+/// Трение скольжения сбитого пешехода по земле, 1/с: при отлёте 6 м/с
+/// он проезжает около метра (6 / 6).
+const double _knockbackFriction = 6.0;
 
 const double _arrivalEpsilon = 0.1;
 
@@ -76,6 +111,29 @@ bool advancePedestrian(
   required double speed,
   required math.Random random,
 }) {
+  if (pedestrian.isKnockedDown) {
+    pedestrian.knockedDownSeconds = math.max(0.0, pedestrian.knockedDownSeconds - dt);
+    pedestrian.position += pedestrian.knockbackVelocity * dt;
+    pedestrian.knockbackVelocity.scale(math.exp(-_knockbackFriction * dt));
+    return false;
+  }
+
+  // Встал после удара — сначала обратно на ребро (см. Pedestrian.returnPoint).
+  final returnPoint = pedestrian.returnPoint;
+  if (returnPoint != null) {
+    final back = returnPoint - pedestrian.position;
+    final backDistance = back.length;
+    if (backDistance <= _arrivalEpsilon) {
+      pedestrian.position = returnPoint;
+      pedestrian.returnPoint = null;
+    } else {
+      final direction = back / backDistance;
+      pedestrian.position += direction * math.min(speed * dt, backDistance);
+      pedestrian.yaw = math.atan2(direction.x, direction.z);
+      return false;
+    }
+  }
+
   final target = graph.nodes[pedestrian.targetNodeId];
   if (target == null) return false;
 

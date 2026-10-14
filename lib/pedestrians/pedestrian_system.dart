@@ -8,8 +8,8 @@ import '../world/road_graph.dart';
 import 'pedestrian.dart';
 
 /// Держит NPC-пешеходов вокруг игрока/машины: спавнит рядом
-/// ([spawnRadius]), телепортирует обратно рядом, когда отходят дальше
-/// [despawnRadius], двигает по дорожному графу (см. pedestrian.dart —
+/// ([spawnRadius]), переселяет в кольцо [minRespawnDistance]..[spawnRadius],
+/// когда отходят дальше [despawnRadius], двигает по дорожному графу (см. pedestrian.dart —
 /// сама ходьба протестирована юнит-тестом отдельно от рендера).
 ///
 /// Рендер — один общий `InstancedMesh` на всех пешеходов (капсулы, как у
@@ -26,6 +26,7 @@ class PedestrianSystem {
     this.population = 16,
     this.spawnRadius = 120.0,
     this.despawnRadius = 180.0,
+    this.minRespawnDistance = 70.0,
     this.walkSpeed = 1.3,
     math.Random? random,
   }) : adjacency = buildPedestrianAdjacency(graph),
@@ -61,6 +62,7 @@ class PedestrianSystem {
   final int population;
   final double spawnRadius;
   final double despawnRadius;
+  final double minRespawnDistance;
   final double walkSpeed;
   final InstancedMesh bodies;
 
@@ -156,8 +158,8 @@ class PedestrianSystem {
   /// начальную популяцию вокруг [trackedPosition] — раньше нельзя, узлы
   /// графа сами по себе не знают, где стартует игрок. [vehiclePosition]/
   /// [vehicleSpeed] — если заданы (машина существует и её скорость выше
-  /// [hitSpeedThreshold]), пешеходы в радиусе удара телепортируются
-  /// (см. _respawnNear) и засчитываются в возвращаемое число наездов —
+  /// [hitSpeedThreshold]), пешеходы в радиусе удара падают (см.
+  /// Pedestrian.knockDown) и засчитываются в возвращаемое число наездов —
   /// на нём строится WantedSystem (см. lib/police).
   int update(
     double dt,
@@ -185,23 +187,37 @@ class PedestrianSystem {
       );
       if (arrived) _ensurePassableTarget(pedestrian);
 
-      if (canHit && (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {
+      // Лежачего повторно не сбить и не засчитать второй раз в розыск.
+      if (canHit &&
+          !pedestrian.isKnockedDown &&
+          (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {
         hits++;
-        _respawnNear(pedestrian, trackedPosition);
+        pedestrian.knockDown(vehiclePosition, vehicleSpeed);
       } else if ((pedestrian.position - trackedPosition).length2 > despawnRadiusSq) {
         _respawnNear(pedestrian, trackedPosition);
       }
 
-      bodies.setInstanceTransform(
-        pedestrian.instanceIndex,
-        vm.Matrix4.compose(
-          pedestrian.position + vm.Vector3(0, _totalHeight / 2, 0),
-          vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), pedestrian.yaw),
-          vm.Vector3.all(1.0),
-        ),
-      );
+      bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
     }
     return hits;
+  }
+
+  /// Стоящий — капсула вертикально по курсу; сбитый — лежит на земле
+  /// вдоль направления отлёта (поворот на 90° вокруг своей поперечной оси).
+  vm.Matrix4 _instanceTransform(Pedestrian pedestrian) {
+    final heading = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), pedestrian.yaw);
+    if (!pedestrian.isKnockedDown) {
+      return vm.Matrix4.compose(
+        pedestrian.position + vm.Vector3(0, _totalHeight / 2, 0),
+        heading,
+        vm.Vector3.all(1.0),
+      );
+    }
+    return vm.Matrix4.compose(
+      pedestrian.position + vm.Vector3(0, _radius, 0),
+      heading * vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), math.pi / 2),
+      vm.Vector3.all(1.0),
+    );
   }
 
   void _spawnInitialPopulation(vm.Vector3 center) {
@@ -219,12 +235,19 @@ class PedestrianSystem {
     }
   }
 
+  /// Ушедший за [despawnRadius] пешеход переселяется — но не куда попало в
+  /// [spawnRadius], а в кольцо от [minRespawnDistance]: раньше он мог
+  /// возникнуть прямо перед игроком из воздуха. Камера здесь сознательно не
+  /// участвует (существование агентов — только по расстоянию, см.
+  /// PROGRESS.md, "Принцип, который нельзя нарушать").
   void _respawnNear(Pedestrian pedestrian, vm.Vector3 center) {
-    final fresh = _createAt(_randomWalkableNodeNear(center));
+    final fresh = _createAt(_randomWalkableNodeNear(center, minDistance: minRespawnDistance));
     pedestrian
       ..position = fresh.position
       ..currentNodeId = fresh.currentNodeId
-      ..targetNodeId = fresh.targetNodeId;
+      ..targetNodeId = fresh.targetNodeId
+      ..knockedDownSeconds = 0.0
+      ..returnPoint = null;
   }
 
   Pedestrian _createAt(RoadGraphNode node) {
@@ -279,13 +302,22 @@ class PedestrianSystem {
 
   /// Только узлы с хотя бы одним соседом — иначе пешеход появится и сразу
   /// встанет колом (см. advancePedestrian: без соседей цель = сам узел).
-  RoadGraphNode _randomWalkableNodeNear(vm.Vector3 center) {
+  ///
+  /// [minDistance] > 0 — только узлы не ближе него (кольцо); если в кольце
+  /// узлов нет, годится любой в [spawnRadius].
+  RoadGraphNode _randomWalkableNodeNear(vm.Vector3 center, {double minDistance = 0.0}) {
     final nearby = <RoadGraphNode>[];
+    final ring = <RoadGraphNode>[];
     final radiusSq = spawnRadius * spawnRadius;
+    final minSq = minDistance * minDistance;
     for (final node in graph.nodes.values) {
       if (adjacency[node.id]?.isEmpty ?? true) continue;
-      if ((node.toVector3() - center).length2 <= radiusSq) nearby.add(node);
+      final distanceSq = (node.toVector3() - center).length2;
+      if (distanceSq > radiusSq) continue;
+      nearby.add(node);
+      if (distanceSq >= minSq) ring.add(node);
     }
+    if (ring.isNotEmpty) return ring[_random.nextInt(ring.length)];
     if (nearby.isNotEmpty) return nearby[_random.nextInt(nearby.length)];
 
     // Игрок дальше spawnRadius от любой дороги (внутри двора/дома) —
