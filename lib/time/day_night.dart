@@ -17,8 +17,14 @@ class GameClock {
   /// 24 минуты игры.
   double gameMinutesPerSecond;
 
-  void advance(double realSeconds) {
-    hours += realSeconds * gameMinutesPerSecond / 60.0;
+  void advance(double realSeconds) => skipHours(realSeconds * gameMinutesPerSecond / 60.0);
+
+  /// Перемотать на [gameHours] игровых часов — в игровых единицах, без
+  /// пересчёта через реальное время (кнопка "time +1h" так и ошиблась:
+  /// 3600 "реальных секунд" при минуте за секунду — это 60 часов, на
+  /// циферблате +12).
+  void skipHours(double gameHours) {
+    hours += gameHours;
     while (hours >= 24.0) {
       hours -= 24.0;
       dayOfYear = dayOfYear % 365 + 1;

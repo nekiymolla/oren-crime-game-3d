@@ -70,6 +70,15 @@ void main() {
     expect(sunset.horizonColor.x, greaterThan(sunset.horizonColor.z));
   });
 
+  test('перемотка на час — ровно час, в том числе через полночь', () {
+    final clock = GameClock(hours: 16.5, dayOfYear: 287);
+    clock.skipHours(1);
+    expect(clock.label, '17:30');
+    clock.skipHours(7);
+    expect(clock.label, '00:30');
+    expect(clock.dayOfYear, 288);
+  });
+
   test('часы идут, переходят через полночь и пишут время', () {
     final clock = GameClock(hours: 23.9, dayOfYear: 365, gameMinutesPerSecond: 1.0);
     clock.advance(12); // +12 игровых минут

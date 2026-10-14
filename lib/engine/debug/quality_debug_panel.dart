@@ -102,7 +102,7 @@ class _QualityDebugPanelState extends State<QualityDebugPanel> {
         }),
         // Перемотка времени — посмотреть закат/ночь, не ожидая минутами.
         _row('time +1h', () {
-          setState(() => game.clock.advance(60 * 60 / game.clock.gameMinutesPerSecond));
+          setState(() => game.clock.skipHours(1));
         }),
       ],
     );
