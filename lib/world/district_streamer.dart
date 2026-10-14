@@ -89,6 +89,23 @@ class DistrictStreamer {
     if (pending.isNotEmpty) await Future.wait(pending);
   }
 
+  /// Загруженные чанки, чей мировой bounding box пересекается с [box] —
+  /// добавляет их в [out] (список переиспользуется вызывающим, чтобы не
+  /// аллоцировать каждый кадр). Нужно, чтобы рейкасты персонажа обходили не
+  /// весь граф сцены, а один-два ближних чанка (см.
+  /// CharacterCollisionField): каждый `raycastNode` иначе считает обратную
+  /// матрицу и тест ограничивающего объёма на КАЖДЫЙ узел сцены.
+  ///
+  /// Чанк без вычислимых границ (`combinedWorldBounds == null` — движок так
+  /// сообщает "считать всегда видимым") попадает в список безусловно:
+  /// пропустить его значило бы потерять коллизии, а это хуже любой экономии.
+  void collectChunksOverlapping(vm.Aabb3 box, List<Node> out) {
+    for (final chunk in _loaded.values) {
+      final bounds = chunk.combinedWorldBounds;
+      if (bounds == null || bounds.intersectsWithAabb3(box)) out.add(chunk);
+    }
+  }
+
   Set<String> _wantedChunkIds(vm.Vector3 pos) {
     final centerX = manifest.cellIndexOf(pos.x);
     final centerZ = manifest.cellIndexOf(pos.z);

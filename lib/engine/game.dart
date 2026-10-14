@@ -1,12 +1,13 @@
 import 'dart:math' as math;
 
-import 'package:flutter_scene/kit.dart';
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../core/game_mode.dart';
 import '../core/quality_settings.dart';
 import '../pedestrians/pedestrian_system.dart';
+import '../player/character_collision_field.dart';
+import '../player/character_controller_component.dart';
 import '../player/player_input_bridge_component.dart';
 import '../police/arrest_state.dart';
 import '../police/police_system.dart';
@@ -68,7 +69,13 @@ class Game {
   Node? _groundNode;
   Node? _vegetationNode;
   VegetationBatch? _vegetation;
-  ThirdPersonControllerComponent? _movement;
+
+  /// Свой облегчённый контроллер персонажа вместо встроенного
+  /// `ThirdPersonControllerComponent` (см. character_motion.dart): 3 луча
+  /// обхода препятствий вместо 9 и обход не всего графа сцены, а только
+  /// ближних чанков района (см. [_collisionField]).
+  CharacterControllerComponent? _movement;
+  CharacterCollisionField? _collisionField;
 
   Node? _playerMeshNode;
 
@@ -118,8 +125,7 @@ class Game {
     // между дорогами/зданиями (osm2world строит поверхности только там, где
     // OSM что-то размечает, а разметка реального района местами скудная —
     // см. PROGRESS.md).
-    final ground = buildPlaceholderGround(sizeMeters: groundSizeMeters)
-      ..position = vm.Vector3(0, -0.05, 0);
+    final ground = buildPlaceholderGround(sizeMeters: groundSizeMeters)..position = vm.Vector3(0, -0.05, 0);
     _groundNode = ground;
     scene.add(ground);
     scene.add(_buildSun());
@@ -138,11 +144,7 @@ class Game {
     final roadGraph = await loadRoadGraph();
     if (debugShowRoadGraph) scene.add(buildRoadGraphDebugNode(roadGraph));
 
-    pedestrians = PedestrianSystem(
-      graph: roadGraph,
-      raycastRoot: scene.root,
-      population: quality.pedestrianPopulation,
-    );
+    pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root, population: quality.pedestrianPopulation);
     scene.add(pedestrians.buildNode());
     if (debugShowRoadGraph) {
       _pedestrianDebugLinesNode = pedestrians.buildDebugTargetLinesNode();
@@ -166,11 +168,19 @@ class Game {
     // (см. DistrictStreamer.updateAroundPosition, BUGS.md).
     await districtStreamer.updateAroundPosition(worldConfig.playerSpawnPosition);
 
-    final movement = _movement = ThirdPersonControllerComponent(
+    // Область, по которой идут лучи персонажа: ближние чанки района плюс
+    // машины в пределах досягаемости. Всё остальное (плейсхолдер-земля,
+    // растительность, пешеходы, отладочные линии, камера, свет) в обход не
+    // попадает вообще — землю заменяет groundPlaneHeight в контроллере.
+    final collisionField = _collisionField = CharacterCollisionField(districtStreamer: districtStreamer);
+
+    final movement = _movement = CharacterControllerComponent(
       walkSpeed: 4.5,
       runMultiplier: 1.8,
       jumpVelocity: 6.0,
       groundPlaneHeight: 0.0,
+      bodyRadius: _defaultObstacleRadius,
+      raycast: collisionField.cast,
     );
     playerNode = _buildPlayerNode()..addComponent(movement);
     playerNode.position = worldConfig.playerSpawnPosition;
@@ -189,16 +199,21 @@ class Game {
     // Пара припаркованных машин для разнообразия ("больше машин", см.
     // PROGRESS.md) — чисто декоративные (buildStaticVehicleVisual, без
     // VehicleControllerComponent/повреждений), трафик-AI отдельная задача.
-    scene.add(
-      buildStaticVehicleVisual(VehicleArchetype.hatchback)
-        ..position = worldConfig.playerSpawnPosition + vm.Vector3(-6, 0, -3)
-        ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.pi * 0.15),
-    );
-    scene.add(
-      buildStaticVehicleVisual(VehicleArchetype.pickup)
-        ..position = worldConfig.playerSpawnPosition + vm.Vector3(-8, 0, 6)
-        ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4),
-    );
+    final parkedHatchback = buildStaticVehicleVisual(VehicleArchetype.hatchback)
+      ..position = worldConfig.playerSpawnPosition + vm.Vector3(-6, 0, -3)
+      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.pi * 0.15);
+    final parkedPickup = buildStaticVehicleVisual(VehicleArchetype.pickup)
+      ..position = worldConfig.playerSpawnPosition + vm.Vector3(-8, 0, 6)
+      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4);
+    scene.add(parkedHatchback);
+    scene.add(parkedPickup);
+
+    // Машины — не часть чанков района, поэтому в коллизионную область они
+    // добавляются отдельными корнями (и только когда игрок рядом, иначе
+    // каждый луч обходил бы их поддеревья впустую). Патрульные машины
+    // приходят колбэком: их набор меняется по звёздам розыска.
+    collisionField.addColliderSource(() => [vehicle.node, parkedHatchback, parkedPickup]);
+    collisionField.addColliderSource(() => policeSystem.unitNodes);
 
     final cameraComponent = CameraComponent(
       projection: PerspectiveProjection(far: quality.drawDistanceMeters),
@@ -206,11 +221,7 @@ class Game {
     );
     _cameraComponent = cameraComponent;
     cameraNode = Node()..addComponent(cameraComponent);
-    cameraController = FollowCameraController(
-      followTarget: playerNode,
-      distance: 6.0,
-      lookHeight: 1.5,
-    );
+    cameraController = FollowCameraController(followTarget: playerNode, distance: 6.0, lookHeight: 1.5);
     cameraNode.addComponent(cameraController);
     scene.add(cameraNode);
 
@@ -255,11 +266,12 @@ class Game {
   // raster), и shadowStatic стал постоянным поведением VegetationBatch.
 
   /// Горизонтальные рейкасты игрока (обход препятствий). Встроенный
-  /// контроллер кидает 3 высоты x 3 боковых смещения = 9 лучей на кадр плюс
-  /// один на землю, и при ходьбе ui подскакивает с 10.3 до 21.6 мс. Ручка
-  /// нужна, чтобы отделить их вклад от остального UI-потока: `obstacleRadius`
-  /// = 0 отключает именно их (задокументировано в пакете), не трогая
-  /// гравитацию, прыжок и следование за землёй.
+  /// контроллер кидал 3 высоты x 3 боковых смещения = 9 лучей на кадр плюс
+  /// один на землю, и при ходьбе ui подскакивал с 10.3 до 21.6 мс; свой
+  /// (см. character_motion.dart) кидает 8 + 1, но по узкой области. Ручка
+  /// нужна, чтобы отделить их вклад от остального UI-потока: радиус тела
+  /// = 0 отключает именно их, не трогая гравитацию, прыжок и следование за
+  /// землёй.
   ///
   /// Это диагностика, а не игровая настройка: без этих лучей игрок проходит
   /// сквозь стены.
@@ -272,16 +284,15 @@ class Game {
   /// Рассуждение "за кадр пройдёт 7 см, на следующем вернёт" было неверным.
   /// Путь к экономии здесь — меньше лучей и уже область поиска (свой
   /// контроллер вместо встроенного), а не реже проверки.
-  static const double _defaultObstacleRadius = 0.85;
+  static const double _defaultObstacleRadius = 0.5;
 
   bool _obstacleAvoidance = true;
 
   bool get obstacleAvoidance => _obstacleAvoidance;
   set obstacleAvoidance(bool value) {
     _obstacleAvoidance = value;
-    _movement?.obstacleRadius = value ? _defaultObstacleRadius : 0.0;
+    _movement?.bodyRadius = value ? _defaultObstacleRadius : 0.0;
   }
-
 
   /// Сесть в машину / выйти из неё — не даёт сработать, если игрок дальше
   /// [_vehicleInteractRadius] от машины. Переключает и куда едет камера, и
@@ -416,6 +427,15 @@ class Game {
   void tick(double deltaSeconds) {
     final trackedPosition = trackedNode.globalTransform.getTranslation();
     districtStreamer.updateAroundPosition(trackedPosition);
+
+    // Пересобираем узкий список корней обхода для лучей персонажа — раз в
+    // кадр и ДО тика компонентов (SceneView.onTick сначала зовёт game.tick,
+    // потом рисует сцену, а компоненты тикают на отрисовке). За рулём
+    // контроллер персонажа выключен (см. PlayerInputBridgeComponent), так
+    // что и отбор не нужен.
+    if (gameModeState.mode == ControlMode.onFoot) {
+      _collisionField?.refresh(playerNode.globalTransform.getTranslation());
+    }
     // Возвращает кэш теней растительности, если в этом кадре досадили
     // деревья при загрузке чанка (см. VegetationBatch.commitShadowCache).
     _vegetation?.commitShadowCache();

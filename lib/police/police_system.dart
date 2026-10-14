@@ -68,6 +68,11 @@ class PoliceSystem {
   final List<_PoliceUnit> _units = [];
   double _arrestTimer = 0.0;
 
+  /// Узлы живых патрульных машин — чтобы игрок пешком не проходил сквозь
+  /// них: коллизионная область персонажа собирается из ближних чанков
+  /// района, а машины в чанки не входят (см. CharacterCollisionField).
+  Iterable<Node> get unitNodes => _units.map((unit) => unit.vehicle.node);
+
   /// Зовётся каждый кадр из Game.tick(). Возвращает true ровно в кадр,
   /// когда игрок только что оказался пойман (машина рядом [arrestHoldSeconds]
   /// подряд) — Game сбрасывает розыск/телепортирует игрока в ответ.
