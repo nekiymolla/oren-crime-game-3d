@@ -100,4 +100,21 @@ void main() {
       expect(nextWeather(WeatherKind.clear, 287, random), isNot(anyOf(WeatherKind.rain, WeatherKind.heavyRain)));
     }
   });
+
+  test('кнопка debug-панели меняет погоду сразу, даже при частых нажатиях', () {
+    final weather = WeatherSystem(initial: WeatherKind.clear);
+    weather.cycle(); // малооблачно
+    weather.cycle(); // облачно
+    expect(weather.kind, WeatherKind.cloudy);
+    expect(weather.params.cloudCover, closeTo(weatherPresets[WeatherKind.cloudy]!.cloudCover, 1e-9));
+  });
+
+  test('смена посреди перехода — без скачка', () {
+    final weather = WeatherSystem(initial: WeatherKind.clear);
+    weather.setWeather(WeatherKind.overcast);
+    weather.update(WeatherSystem.transitionSeconds * 0.4, gameHoursPassed: 0, dayOfYear: 287);
+    final before = weather.params.cloudCover;
+    weather.setWeather(WeatherKind.storm);
+    expect(weather.params.cloudCover, closeTo(before, 1e-9));
+  });
 }

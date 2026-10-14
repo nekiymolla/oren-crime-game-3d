@@ -206,7 +206,7 @@ const Map<WeatherKind, WeatherParams> weatherPresets = {
 /// Оренбурга дожди и пасмурно часто, снег — редкость, жары не бывает).
 class WeatherSystem {
   WeatherSystem({WeatherKind initial = WeatherKind.clear, math.Random? random})
-    : _from = initial,
+    : _fromParams = weatherPresets[initial]!,
       _to = initial,
       _random = random ?? math.Random();
 
@@ -214,7 +214,11 @@ class WeatherSystem {
   static const double transitionSeconds = 25.0;
 
   final math.Random _random;
-  WeatherKind _from;
+  /// Откуда идёт переход — снимок того, что было видно в момент смены, а
+  /// не пресет: иначе смена посреди перехода давала скачок, а частые смены
+  /// (кнопка в debug-панели) каждый раз начинали со старой погоды, и
+  /// картинка почти не менялась.
+  WeatherParams _fromParams;
   WeatherKind _to;
   double _progress = 1.0;
   double _hoursUntilChange = 3.0;
@@ -226,7 +230,7 @@ class WeatherSystem {
   /// Смешанные параметры прямо сейчас.
   WeatherParams get params {
     final t = _progress * _progress * (3 - 2 * _progress); // smoothstep
-    final blended = WeatherParams.lerp(weatherPresets[_from]!, weatherPresets[_to]!, t);
+    final blended = WeatherParams.lerp(_fromParams, weatherPresets[_to]!, t);
     // Снег на земле копится и тает своим темпом, а не вместе с переходом.
     return WeatherParams(
       cloudCover: blended.cloudCover,
@@ -244,18 +248,17 @@ class WeatherSystem {
     );
   }
 
-  /// Сменить погоду (debug-панель, будущие миссии).
-  void setWeather(WeatherKind kind) {
-    if (kind == _to) return;
-    // Новый переход начинается с того, что видно сейчас: подменяем "откуда"
-    // на ближайшее из двух, чтобы не было скачка.
-    _from = _progress < 0.5 ? _from : _to;
+  /// Сменить погоду: плавно (от того, что видно сейчас) или [immediately]
+  /// — сразу, для debug-панели.
+  void setWeather(WeatherKind kind, {bool immediately = false}) {
+    if (kind == _to && !immediately) return;
+    _fromParams = params;
     _to = kind;
-    _progress = 0.0;
+    _progress = immediately ? 1.0 : 0.0;
   }
 
-  /// Следующее состояние по кругу — для кнопки в debug-панели.
-  void cycle() => setWeather(WeatherKind.values[(_to.index + 1) % WeatherKind.values.length]);
+  /// Следующее состояние по кругу — для кнопки в debug-панели, сразу.
+  void cycle() => setWeather(WeatherKind.values[(_to.index + 1) % WeatherKind.values.length], immediately: true);
 
   void update(double realSeconds, {required double gameHoursPassed, required int dayOfYear}) {
     if (_progress < 1.0) {
