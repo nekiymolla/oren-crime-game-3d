@@ -169,7 +169,9 @@ class TrafficSystem {
       ..toNodeId = fresh.toNodeId
       ..nextNodeId = null
       ..stoppedSeconds = 0.0
-      ..isTurningAround = false;
+      ..isTurningAround = false
+      ..edgeSeconds = 0.0
+      ..impatientSeconds = 0.0;
   }
 
   void _syncNode(_TrafficUnit unit) {
@@ -204,8 +206,7 @@ class TrafficSystem {
       final direction = to - from;
       if (direction.length2 < 1e-6) continue;
       direction.normalize();
-      final isOneway = network.edge(fromId, toId)?.oneway ?? false;
-      final position = from + (isOneway ? vm.Vector3.zero() : rightOf(direction) * trafficLaneOffset);
+      final position = network.laneStart(fromId, toId);
       final crowded = _units.any(
         (unit) => (unit.car.position - position).length2 < _spawnSpacing * _spawnSpacing,
       );

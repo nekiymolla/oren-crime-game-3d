@@ -108,6 +108,16 @@ class Game {
   /// дорожным графом. null, если debugShowRoadGraph выключен.
   Node? _pedestrianDebugLinesNode;
 
+  /// Отладочный слой дорожного графа (только при [debugShowRoadGraph]).
+  Node? _roadGraphDebugNode;
+
+  /// Для debug-панели: показать/скрыть слой графа и линии целей пешеходов.
+  bool get roadGraphDebugVisible => _roadGraphDebugNode?.visible ?? false;
+  set roadGraphDebugVisible(bool value) {
+    _roadGraphDebugNode?.visible = value;
+    _pedestrianDebugLinesNode?.visible = value;
+  }
+
   /// Публичный, чтобы GameHud мог подключить [CameraControls] — сам
   /// контроллер прикреплён к cameraNode как компонент и двигает камеру
   /// каждый кадр независимо от того, кто шлёт в него drag-события.
@@ -170,12 +180,25 @@ class Game {
     // Дорожный граф — настоящий потребитель: NPC-пешеходы ходят по нему.
     // Жёлтые линии-визуализация — только в debug-сборке (debugShowRoadGraph).
     final roadGraph = await loadRoadGraph();
-    if (debugShowRoadGraph) scene.add(buildRoadGraphDebugNode(roadGraph));
+    if (debugShowRoadGraph) {
+      // Жёлтый — где ездит трафик, серый — дворовые проезды (service, трафик
+      // туда не заезжает), голубой — пешеходные дорожки. Скрыт, пока не
+      // включён в debug-панели: постоянно поверх города он мешал смотреть.
+      final graphNode = _roadGraphDebugNode = buildRoadGraphDebugNode(
+        roadGraph,
+        colorOf: (edge) => trafficHighwayTypes.contains(edge.highway)
+            ? vm.Vector4(1.0, 0.85, 0.1, 1.0)
+            : edge.highway == 'service'
+            ? vm.Vector4(0.55, 0.55, 0.55, 1.0)
+            : vm.Vector4(0.3, 0.8, 1.0, 1.0),
+      )..visible = false;
+      scene.add(graphNode);
+    }
 
     pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root, population: quality.pedestrianPopulation);
     scene.add(pedestrians.buildNode());
     if (debugShowRoadGraph) {
-      _pedestrianDebugLinesNode = pedestrians.buildDebugTargetLinesNode();
+      _pedestrianDebugLinesNode = pedestrians.buildDebugTargetLinesNode()..visible = false;
       scene.add(_pedestrianDebugLinesNode!);
     }
     policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene);

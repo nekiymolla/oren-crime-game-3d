@@ -95,6 +95,11 @@ class _QualityDebugPanelState extends State<QualityDebugPanel> {
         _row('rays ${_onOff(game.obstacleAvoidance)}', () {
           setState(() => game.obstacleAvoidance = !game.obstacleAvoidance);
         }),
+        // Дорожный граф: жёлтый — трафик, серый — дворовые проезды, голубой
+        // — пешеходные дорожки (см. Game.roadGraphDebugVisible).
+        _row('graph ${_onOff(game.roadGraphDebugVisible)}', () {
+          setState(() => game.roadGraphDebugVisible = !game.roadGraphDebugVisible);
+        }),
       ],
     );
   }

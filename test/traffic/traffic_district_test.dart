@@ -40,6 +40,32 @@ void main() {
     return best;
   }
 
+  /// Пересекаются ли кузова двух машин (прямоугольники в плане с учётом
+  /// курса, теорема о разделяющей оси). Расстояние между центрами — плохая
+  /// мера: встречные на 4-метровой дворовой расходятся с центрами в 2 м,
+  /// и это не наложение.
+  bool bodiesOverlap(TrafficCar a, TrafficCar b) {
+    const halfLength = 2.2, halfWidth = 0.9;
+    List<vm.Vector2> corners(TrafficCar c) {
+      final f = vm.Vector2(math.sin(c.heading), math.cos(c.heading));
+      final r = vm.Vector2(-f.y, f.x);
+      final p = vm.Vector2(c.position.x, c.position.z);
+      return [
+        for (final (lf, lr) in [(1, 1), (1, -1), (-1, -1), (-1, 1)]) p + f * (halfLength * lf) + r * (halfWidth * lr),
+      ];
+    }
+
+    final ca = corners(a), cb = corners(b);
+    for (final c in [a, b]) {
+      final f = vm.Vector2(math.sin(c.heading), math.cos(c.heading));
+      for (final axis in [f, vm.Vector2(-f.y, f.x)]) {
+        final pa = ca.map(axis.dot), pb = cb.map(axis.dot);
+        if (pa.reduce(math.max) < pb.reduce(math.min) || pb.reduce(math.max) < pa.reduce(math.min)) return false;
+      }
+    }
+    return true;
+  }
+
   List<TrafficCar> spawn(math.Random random, int count) {
     final starts = network.adjacency.keys.where((id) {
       final n = graph.nodes[id]!;
@@ -54,10 +80,7 @@ void main() {
       final direction = graph.nodes[toId]!.toVector3() - from;
       if (direction.length2 < 1e-6) continue;
       direction.normalize();
-      final oneway = network.edge(fromId, toId)!.oneway;
-      final position =
-          from +
-          (oneway ? vm.Vector3.zero() : rightOf(direction) * trafficLaneOffset);
+      final position = network.laneStart(fromId, toId);
       if (cars.any((c) => (c.position - position).length < 15)) continue;
       cars.add(
         TrafficCar(
@@ -84,6 +107,8 @@ void main() {
         var closest = double.infinity;
         var maxStopped = 0.0;
         var closestInfo = '';
+        var overlaps = 0;
+        var overlapInfo = '';
         String? worstOffRoadInfo;
 
         for (var step = 0; step < 5 * 60 * 30; step++) {
@@ -104,6 +129,17 @@ void main() {
           }
           for (var i = 0; i < cars.length; i++) {
             for (var j = i + 1; j < cars.length; j++) {
+              if (bodiesOverlap(cars[i], cars[j])) {
+                overlaps++;
+                if (overlapInfo.isEmpty) {
+                  String info(TrafficCar c) =>
+                      '${c.fromNodeId}->${c.toNodeId}->${c.nextNodeId} '
+                      'pos=${c.position.x.toStringAsFixed(1)},${c.position.z.toStringAsFixed(1)} '
+                      'hdg=${c.heading.toStringAsFixed(2)} v=${c.speed.toStringAsFixed(1)} '
+                      'prio=${c.priority} uturn=${c.isTurningAround}';
+                  overlapInfo = 't=${(step * dt).toStringAsFixed(1)}\n  ${info(cars[i])}\n  ${info(cars[j])}';
+                }
+              }
               final d = (cars[i].position - cars[j].position).length;
               if (d < closest) {
                 closest = d;
@@ -136,10 +172,10 @@ void main() {
         // ignore: avoid_print
         print(
           'съезд с оси макс ${worstOffRoad.toStringAsFixed(2)} м ($worstOffRoadInfo), '
-          'ближе всего машины ${closest.toStringAsFixed(2)} м ($closestInfo), дольше всего стояла ${maxStopped.toStringAsFixed(1)} с',
+          'наложений кузовов $overlaps кадров ($overlapInfo), ближе всего центры ${closest.toStringAsFixed(2)} м ($closestInfo), дольше всего стояла ${maxStopped.toStringAsFixed(1)} с',
         );
         expect(worstOffRoad, lessThan(4.0));
-        expect(closest, greaterThan(2.0));
+        expect(overlaps, 0);
         // Красный длится до фазы соседнего направления плюс очередь — вечная
         // пробка видна как стоянка в разы дольше цикла.
         expect(maxStopped, lessThan(SignalTiming.cycle * 1.5));

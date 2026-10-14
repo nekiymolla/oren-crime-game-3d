@@ -28,7 +28,7 @@ TrafficCar _carAt(TrafficNetwork network, String from, String to) {
   final b = network.graph.nodes[to]!;
   final direction = (b.toVector3() - a.toVector3()).normalized();
   return TrafficCar(
-    position: a.toVector3() + rightOf(direction) * trafficLaneOffset,
+    position: network.laneStart(from, to),
     heading: math.atan2(direction.x, direction.z),
     fromNodeId: from,
     toNodeId: to,
@@ -56,15 +56,18 @@ void main() {
     final network = TrafficNetwork(_graph({'a': (0, 0), 'b': (0, 200)}, [('a', 'b')]));
     final car = _carAt(network, 'a', 'b');
     _drive(car, network, 6.0);
+    final lane = laneOffsetFor('residential');
     // Курс +Z, правая рука — на -X.
-    expect(car.position.x, closeTo(-trafficLaneOffset, 0.05));
+    expect(car.position.x, closeTo(-lane, 0.05));
+    // Кузов на асфальте дворовой дороги (до 15 см на бордюре).
+    expect(lane + TrafficDriving.halfWidth, lessThanOrEqualTo(roadHalfWidthFor('residential') + 0.15));
     expect(car.speed, closeTo(9.0, 0.1));
   });
 
   test('тормозит и встаёт перед препятствием в своей полосе', () {
     final network = TrafficNetwork(_graph({'a': (0, 0), 'b': (0, 200)}, [('a', 'b')]));
     final car = _carAt(network, 'a', 'b');
-    final obstacle = (position: vm.Vector3(-trafficLaneOffset, 0, 50), radius: 0.9);
+    final obstacle = (position: vm.Vector3(-laneOffsetFor('residential'), 0, 50), radius: 0.9);
     _drive(car, network, 15.0, obstacles: [obstacle]);
     expect(car.speed, closeTo(0.0, 0.01));
     final gap = 50 - car.position.z;
@@ -75,7 +78,7 @@ void main() {
   test('встречку не замечает — едет мимо', () {
     final network = TrafficNetwork(_graph({'a': (0, 0), 'b': (0, 200)}, [('a', 'b')]));
     final car = _carAt(network, 'a', 'b');
-    _drive(car, network, 10.0, obstacles: [(position: vm.Vector3(trafficLaneOffset, 0, 50), radius: 0.9)]);
+    _drive(car, network, 10.0, obstacles: [(position: vm.Vector3(laneOffsetFor('residential'), 0, 50), radius: 0.9)]);
     expect(car.position.z, greaterThan(60.0));
   });
 
@@ -92,9 +95,9 @@ void main() {
     });
     expect(minSpeedNearCorner, lessThan(9.0 * 0.7));
     expect(car.toNodeId, 'c');
-    // Курс +X, правая рука — на +Z: полоса на z = 60 + 1.5.
+    // Курс +X, правая рука — на +Z: полоса на z = 60 + сдвиг полосы.
     expect(car.position.x, greaterThan(30.0));
-    expect(car.position.z, closeTo(60 + trafficLaneOffset, 0.3));
+    expect(car.position.z, closeTo(60 + laneOffsetFor('residential'), 0.3));
   });
 
   test('по кварталу кружит минутами и не уходит с дороги', () {

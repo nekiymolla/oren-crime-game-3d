@@ -75,30 +75,37 @@ Future<RoadGraph> loadRoadGraph() async {
   return RoadGraph.fromJson(jsonDecode(raw) as Map<String, dynamic>);
 }
 
-/// Временная отладочная визуализация — тонкие цветные линии вдоль дорог,
-/// приподнятые над землёй на [heightOffset], чтобы не сливаться с дорожным
-/// полотном (z-fighting). Полноценного потребителя графа (NPC/трафик) пока
-/// нет, а без визуализации саму топологию было бы не проверить на устройстве
-/// без ручного дебага (см. PROGRESS.md).
-Node buildRoadGraphDebugNode(RoadGraph graph, {double heightOffset = 0.15}) {
-  final positions = Float32List(graph.edges.length * 6);
-  var i = 0;
+/// Отладочная визуализация графа — тонкие линии вдоль дорог, приподнятые
+/// над землёй на [heightOffset] (против z-fighting). Цвет ребра задаёт
+/// [colorOf]: раньше весь граф был одного жёлтого цвета, включая
+/// пешеходные дорожки по газонам, и выглядел как "машины ездят по
+/// тротуарам" (замечено 14.10.2026 — на деле трафик по ним не ездит).
+/// Рёбра одного цвета — один меш.
+Node buildRoadGraphDebugNode(
+  RoadGraph graph, {
+  double heightOffset = 0.15,
+  vm.Vector4 Function(RoadGraphEdge edge)? colorOf,
+}) {
+  final byColor = <String, (vm.Vector4, List<double>)>{};
   for (final edge in graph.edges) {
     final from = graph.nodes[edge.from];
     final to = graph.nodes[edge.to];
     if (from == null || to == null) continue;
-    positions[i++] = from.x;
-    positions[i++] = heightOffset;
-    positions[i++] = from.z;
-    positions[i++] = to.x;
-    positions[i++] = heightOffset;
-    positions[i++] = to.z;
+    final color = colorOf?.call(edge) ?? vm.Vector4(1.0, 0.85, 0.1, 1.0);
+    final bucket = byColor.putIfAbsent(color.toString(), () => (color, <double>[]));
+    bucket.$2.addAll([from.x, heightOffset, from.z, to.x, heightOffset, to.z]);
   }
 
-  final geometry = LineSegmentsGeometry(
-    LineSegmentData(positions: positions.sublist(0, i)),
-    width: 0.3,
-  );
-  final material = UnlitMaterial()..baseColorFactor = vm.Vector4(1.0, 0.85, 0.1, 1.0);
-  return Node(mesh: Mesh(geometry, material));
+  final root = Node();
+  for (final (color, positions) in byColor.values) {
+    root.add(
+      Node(
+        mesh: Mesh(
+          LineSegmentsGeometry(LineSegmentData(positions: Float32List.fromList(positions)), width: 0.3),
+          UnlitMaterial()..baseColorFactor = color,
+        ),
+      ),
+    );
+  }
+  return root;
 }

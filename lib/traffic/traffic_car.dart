@@ -19,10 +19,26 @@ const Set<String> trafficHighwayTypes = {
   'living_street',
 };
 
+/// Полуширина нарисованного асфальта по типу дороги, метры. Замерено по
+/// материалам чанков (14.10.2026): у `residential` асфальт кончается на
+/// ~2.0 м от оси (дорога 4 м, как настоящие дворовые проезды), у
+/// `tertiary`/`unclassified` — на ~3.5 м. osm2world берёт ширину из
+/// тегов/умолчаний, так что это свойство данных, а не догадка.
+double roadHalfWidthFor(String highway) => switch (highway) {
+  'residential' || 'living_street' => 2.0,
+  _ => 3.5,
+};
+
 /// Сдвиг центра машины от оси дороги вправо, метры: правостороннее
-/// движение. Проверено пайплайном вместе с шириной кузова — дома не
-/// задевает ни одно ребро [trafficHighwayTypes].
-const double trafficLaneOffset = 1.5;
+/// движение. Полоса — середина своей половины асфальта, но не ближе
+/// полуширины кузова к краю. Раньше был один сдвиг 1.5 м на все дороги — и
+/// на узких дворовых машина свешивалась на тротуар на 0.4 м (замечено
+/// вживую). На 4-метровой дворовой встречные расходятся впритирку, как и в
+/// жизни.
+double laneOffsetFor(String highway) => switch (highway) {
+  'residential' || 'living_street' => 1.2,
+  _ => 1.75,
+};
 
 /// Дальше этого от узла точку поворота не выносим (см. cornerPoint).
 const double _maxCornerOffset = 3.5;
@@ -44,12 +60,37 @@ class TrafficNetwork {
   final Map<String, List<String>> adjacency = {};
   final Map<String, RoadGraphEdge> _edges = {};
 
+  final Map<String, Set<String>> _undirected = {};
+
   void _addDirected(String from, String to, RoadGraphEdge edge) {
     (adjacency[from] ??= []).add(to);
     _edges['$from|$to'] = edge;
+    (_undirected[from] ??= {}).add(to);
+    (_undirected[to] ??= {}).add(from);
   }
 
+  /// Настоящий перекрёсток (3+ направления), а не изгиб дороги — на нём
+  /// машины проезжают по одной (см. TrafficDriving.junctionClaimRadius).
+  bool isJunction(String nodeId) => (_undirected[nodeId]?.length ?? 0) >= 3;
+
   RoadGraphEdge? edge(String from, String to) => _edges['$from|$to'];
+
+  /// Сдвиг полосы вправо от оси для ребра from -> to; на односторонних —
+  /// по оси (там обе полосы в одну сторону).
+  double laneOffset(String from, String to) {
+    final e = edge(from, to);
+    if (e == null || e.oneway) return 0.0;
+    return laneOffsetFor(e.highway);
+  }
+
+  /// Начало полосы ребра from -> to — куда ставить машину при спавне.
+  vm.Vector3 laneStart(String from, String to) {
+    final a = graph.nodes[from]!;
+    final start = a.toVector3();
+    final direction = _direction(a, graph.nodes[to]!);
+    if (direction == null) return start;
+    return start + rightOf(direction) * laneOffset(from, to);
+  }
 
   /// Крейсерская скорость по типу дороги, м/с — во дворах ползут, на
   /// магистралях едут бодрее (числа на глаз, ~20-60 км/ч).
@@ -68,10 +109,9 @@ class TrafficNetwork {
     final a = graph.nodes[from]!;
     final b = graph.nodes[to]!;
     final target = b.toVector3();
-    if (edge(from, to)?.oneway ?? false) return target;
     final direction = _direction(a, b);
     if (direction == null) return target;
-    return target + rightOf(direction) * trafficLaneOffset;
+    return target + rightOf(direction) * laneOffset(from, to);
   }
 
   /// Точка поворота при проезде from -> via -> to: пересечение линии
@@ -92,7 +132,7 @@ class TrafficNetwork {
     if (cross.abs() < 0.17) return fallback; // меньше ~10° или больше ~170°
 
     final p1 = lanePoint(from, via);
-    final p2 = b.toVector3() + ((edge(via, to)?.oneway ?? false) ? vm.Vector3.zero() : rightOf(d2) * trafficLaneOffset);
+    final p2 = b.toVector3() + rightOf(d2) * laneOffset(via, to);
     // p1 + d1 * t = p2 + d2 * u  ->  t из 2D-векторного произведения.
     final w = p2 - p1;
     final t = (w.x * d2.z - w.z * d2.x) / cross;
@@ -185,6 +225,20 @@ class TrafficCar {
   /// выносило с дороги.
   bool isTurningAround = false;
 
+  /// Сколько секунд машина на текущем ребре — кто из выезжающих с
+  /// перекрёстка въехал на него раньше (см. правило перекрёстка в
+  /// stepTrafficCar).
+  double edgeSeconds = 0.0;
+
+  /// Сколько секунд машина стоит НЕ на красный — то есть уступает кому-то
+  /// по правилам вежливости. Дольше [TrafficDriving.patienceSeconds] —
+  /// перестаёт уступать (см. stepTrafficCar): правила перекрёстка и
+  /// приоритета иногда замыкаются в круг, и без этого машины ждали друг
+  /// друга вечно.
+  double impatientSeconds = 0.0;
+
+  bool get isImpatient => impatientSeconds > TrafficDriving.patienceSeconds;
+
   vm.Vector3 get forward => vm.Vector3(math.sin(heading), 0, math.cos(heading));
 }
 
@@ -200,20 +254,25 @@ abstract final class TrafficDriving {
 
   /// Минимальный радиус поворота, м, и предел скорости рысканья, рад/с.
   static const double minTurnRadius = 4.5;
+  static const double slowTurnRadius = 2.2;
   static const double maxYawRate = 1.6;
 
   /// Скорость прохождения разворота на 180° — ниже её в повороты не
   /// сбрасывают.
   static const double tightTurnSpeed = 2.5;
 
+  /// Скорость поворота больше 45° на узкую дорогу.
+  static const double narrowTurnSpeed = 3.5;
+
   /// Разворот (курс мимо цели больше чем на [uTurnHeadingError] рад —
   /// тупик или обратный выезд с перекрёстка): ползком и по радиусу ровно
-  /// в полосу — из своей во встречную 2 x 1.5 м. С обычным радиусом
+  /// в полосу — из своей во встречную, то есть радиус = сдвиг полосы (см.
+  /// stepTrafficCar), но не меньше [uTurnMinRadius]. С обычным радиусом
   /// машину выносило на 7.5 м с дороги (симуляция по графу района).
   static const double uTurnHeadingError = 1.5;
   static const double uTurnDoneHeadingError = 0.3;
   static const double uTurnSpeed = 1.5;
-  static const double uTurnRadius = trafficLaneOffset;
+  static const double uTurnMinRadius = 1.0;
 
   /// За сколько метров до конца полосы переключаться на следующее ребро,
   /// когда дуга не вписывается (разворот, тупик); обычные повороты
@@ -228,6 +287,13 @@ abstract final class TrafficDriving {
   static const double halfWidth = 0.9;
   static const double lateralMargin = 0.3;
 
+  /// Встречные расходятся, если между бортами хотя бы столько; на дворовой
+  /// полосы в 2.4 м — зазор 0.6. Ноль, а не запас: выезжающая с поворота
+  /// машина ещё не выровнялась, и с запасом видела встречную очередь "в
+  /// своей полосе" — вставала, а очередь ждала её (хоровод на перекрёстке,
+  /// симуляция района). Реальные пересечения кузовов ловит тест.
+  static const double oncomingMargin = 0.0;
+
   /// Нос машины от центра плюс дистанция, на которой она останавливается.
   static const double stopGap = 4.0;
 
@@ -241,6 +307,32 @@ abstract final class TrafficDriving {
 
   /// Вплотную ближе этого — правило "кто сзади, тот уступает".
   static const double bubble = 6.0;
+
+  /// Перекрёсток (узел с 3+ направлениями) занимает одна машина: та, что
+  /// ближе этого к узлу и выезжает с него (раньше всех въехавшая), а если
+  /// таких нет — ближайшая из подъезжающих. Остальные ждут на этом
+  /// расстоянии от узла. Без правила при слиянии (две машины сворачивают
+  /// на одно ребро с разных сторон) кузова въезжали друг в друга и так и
+  /// застревали — симуляция района, 7170 кадров наложения.
+  static const double junctionClaimRadius = 12.0;
+
+  /// Сколько машина готова уступать, стоя не на красный, прежде чем
+  /// поехать сама (см. TrafficCar.impatientSeconds). Физическую помеху
+  /// прямо впереди нетерпеливая всё равно не таранит.
+  static const double patienceSeconds = 5.0;
+
+  /// Прижимание вправо перед встречной: замечаем её за столько метров,
+  /// хотим между центрами столько, сдвигаемся не больше чем на столько.
+  static const double squeezeLookAhead = 22.0;
+  static const double squeezeWantedGap = 2.4;
+  static const double maxSqueeze = 0.8;
+
+  /// Встречная в колее: встать в стольких метрах (между центрами), а
+  /// нетерпеливой — ползти со скоростью [creepSpeed], пока центры дальше
+  /// [creepMinGap].
+  static const double oncomingStopGap = 6.0;
+  static const double creepSpeed = 1.0;
+  static const double creepMinGap = 3.0;
 }
 
 /// Один шаг машины трафика. Возвращает false, если ехать дальше некуда
@@ -279,8 +371,10 @@ bool stepTrafficCar(
     car.fromNodeId = car.toNodeId;
     car.toNodeId = next;
     car.nextNodeId = network.pickNext(car.fromNodeId, car.toNodeId, random);
+    car.edgeSeconds = 0.0;
     target = _edgeTarget(network, car);
   }
+  car.edgeSeconds += dt;
 
   // 2. Желаемая скорость: крейсерская по типу дороги, но с запасом на то,
   // чтобы успеть сбросить до скорости поворота на конце ребра.
@@ -290,10 +384,17 @@ bool stepTrafficCar(
   final distanceToNode = (target - car.position).length;
   if (next != null) {
     final angle = network.turnAngle(car.fromNodeId, car.toNodeId, next);
-    final cornerSpeed = math.max(
+    var cornerSpeed = math.max(
       TrafficDriving.tightTurnSpeed,
       cruise * math.pow(math.cos(angle / 2), 2),
     );
+    // На узкой дороге (дворовая, 4 м) поворот — ползком: на 6 м/с машина
+    // выходила из левого поворота, не успев выровняться в полосу, и
+    // задевала ждущую встречную (симуляция района).
+    final outgoing = network.edge(car.toNodeId, next);
+    if (angle > math.pi / 4 && outgoing != null && roadHalfWidthFor(outgoing.highway) < 3.0) {
+      cornerSpeed = math.min(cornerSpeed, TrafficDriving.narrowTurnSpeed);
+    }
     desired = math.min(
       desired,
       math.sqrt(cornerSpeed * cornerSpeed + 2 * TrafficDriving.comfortDecel * distanceToNode),
@@ -315,6 +416,11 @@ bool stepTrafficCar(
   // Сильно мимо — сначала сбросить скорость, иначе на минимальном радиусе
   // машина кружила бы вокруг цели.
   final aim = _aimPoint(network, car, target);
+  // Встречная близко и в узком зазоре (изгиб дворовой дороги, выезд с
+  // поворота) — прижимаемся вправо, как живой водитель, а не встаём лоб в
+  // лоб (симуляция района: встречные замирали в 1.3 м друг напротив друга).
+  final squeeze = _oncomingSqueeze(car, traffic);
+  if (squeeze > 0.0) aim.add(rightOf(car.forward) * squeeze);
   final toLane = aim - car.position;
   final desiredHeading = math.atan2(toLane.x, toLane.z);
   final headingError = _wrapAngle(desiredHeading - car.heading);
@@ -352,8 +458,17 @@ bool stepTrafficCar(
     final along = relative.dot(forward);
     if (along <= 0.0 || along > TrafficDriving.lookAhead) continue;
     final lateral = relative.dot(right).abs();
-    final inLane = lateral <= halfWidth * 2 + TrafficDriving.lateralMargin;
-    final yieldsSideways = along <= TrafficDriving.nearFieldAhead &&
+    // Встречная (курс почти против нашего) — помеха, только если кузова
+    // реально пересекутся: на 4-метровой дворовой полосы в 2 м друг от
+    // друга, и с обычным запасом встречные вставали бы лоб в лоб навечно.
+    // Пропуск по приоритету и "кто сзади" к встречным тоже не относятся —
+    // они просто разъезжаются.
+    final isOncoming = forward.dot(other.forward) < -0.7;
+    if (isOncoming && lateral >= halfWidth * 2 + TrafficDriving.oncomingMargin) continue;
+    final inLane = lateral <= halfWidth * 2 + (isOncoming ? TrafficDriving.oncomingMargin : TrafficDriving.lateralMargin);
+    final yieldsSideways = !car.isImpatient &&
+        !isOncoming &&
+        along <= TrafficDriving.nearFieldAhead &&
         lateral <= TrafficDriving.nearFieldLateral &&
         other.priority > car.priority;
     // Вплотную (слияние на перекрёстке: две машины свернули на одно ребро
@@ -362,14 +477,30 @@ bool stepTrafficCar(
     // так что вечного взаимного уступания нет (симуляция: без него центры
     // сходились на 0.7 м).
     var yieldsBehind = false;
-    if (relative.length2 < TrafficDriving.bubble * TrafficDriving.bubble) {
+    if (!car.isImpatient && !isOncoming && relative.length2 < TrafficDriving.bubble * TrafficDriving.bubble) {
       final theirAlong = -relative.dot(other.forward);
       yieldsBehind = along > theirAlong + 0.3 ||
           ((along - theirAlong).abs() <= 0.3 && other.priority > car.priority);
     }
     if (!inLane && !yieldsSideways && !yieldsBehind) continue;
+    if (isOncoming) {
+      // Встречная в нашей колее: тормозим только у самого кузова — пока
+      // едем, прижимаемся вправо (см. _oncomingSqueeze), а стоя рулить
+      // нельзя. Нетерпеливая ползёт и подруливает, пока есть место.
+      final oncomingGap = along - TrafficDriving.oncomingStopGap;
+      var limit = oncomingGap <= 0.0 ? 0.0 : math.sqrt(2 * TrafficDriving.comfortDecel * oncomingGap);
+      if (car.isImpatient && along > TrafficDriving.creepMinGap) limit = math.max(limit, TrafficDriving.creepSpeed);
+      desired = math.min(desired, limit);
+      continue;
+    }
     final gap = along - halfWidth - TrafficDriving.stopGap;
     desired = math.min(desired, gap <= 0.0 ? 0.0 : math.sqrt(2 * TrafficDriving.comfortDecel * gap));
+  }
+
+  // 4в. Перекрёсток — по одной машине (см. junctionClaimRadius).
+  final junctionHold = car.isImpatient ? null : _junctionHoldDistance(car, network, traffic);
+  if (junctionHold != null) {
+    desired = math.min(desired, math.sqrt(2 * TrafficDriving.comfortDecel * junctionHold));
   }
 
   // 5. Скорость к желаемой.
@@ -380,7 +511,13 @@ bool stepTrafficCar(
   }
 
   // 6. Поворот руля: не быстрее, чем позволяет радиус разворота.
-  final turnRadius = isUTurn ? TrafficDriving.uTurnRadius : TrafficDriving.minTurnRadius;
+  // На малой скорости руль выкручивается сильнее: радиус падает до
+  // slowTurnRadius. С постоянными 4.5 м точка прицеливания (в 6 м) могла
+  // оказаться внутри круга разворота, и машины кружили вокруг неё на месте
+  // (симуляция района: две машины наматывали круги 45 с).
+  final turnRadius = isUTurn
+      ? math.max(TrafficDriving.uTurnMinRadius, network.laneOffset(car.fromNodeId, car.toNodeId))
+      : car.speed.clamp(TrafficDriving.slowTurnRadius, TrafficDriving.minTurnRadius);
   final yawRate = math.min(TrafficDriving.maxYawRate, car.speed / turnRadius);
   final maxTurn = yawRate * dt;
   car.heading += headingError.clamp(-maxTurn, maxTurn);
@@ -388,6 +525,12 @@ bool stepTrafficCar(
   // 7. Едем.
   car.position += car.forward * (car.speed * dt);
   car.stoppedSeconds = car.speed < 0.3 ? car.stoppedSeconds + dt : 0.0;
+  // Нетерпение копится, только пока стоим не на красный; поехали — сброс.
+  if (car.speed >= 1.0) {
+    car.impatientSeconds = 0.0;
+  } else if (car.speed < 0.3 && stopDistance == null) {
+    car.impatientSeconds += dt;
+  }
   return true;
 }
 
@@ -409,6 +552,68 @@ double? _signalStopDistance(TrafficCar car, TrafficNetwork network, TrafficSigna
   return math.max(0.0, stop);
 }
 
+/// Если перекрёсток впереди (или тот, с которого машина выезжает) занят
+/// другой машиной — сколько ещё можно проехать до рубежа ожидания (0 —
+/// стоять). null — путь свободен.
+double? _junctionHoldDistance(TrafficCar car, TrafficNetwork network, Iterable<TrafficCar> traffic) {
+  const radius = TrafficDriving.junctionClaimRadius;
+  for (final (junctionId, leaving) in [(car.fromNodeId, true), (car.toNodeId, false)]) {
+    if (!network.isJunction(junctionId)) continue;
+    final junction = network.graph.nodes[junctionId]!.toVector3();
+    final myDistance = (junction - car.position).length;
+    if (leaving && myDistance > radius) continue;
+    if (!leaving && myDistance > radius + 15.0) continue;
+
+    for (final other in traffic) {
+      if (identical(other, car)) continue;
+      final otherLeaving = other.fromNodeId == junctionId;
+      if (!otherLeaving && other.toNodeId != junctionId) continue;
+      final otherDistance = (junction - other.position).length;
+      if (otherDistance > radius) continue;
+
+      final bool otherOwns;
+      if (leaving) {
+        // Я уже на выезде: уступаю только выезжающему, въехавшему раньше.
+        otherOwns = otherLeaving &&
+            (other.edgeSeconds > car.edgeSeconds + 1e-6 ||
+                ((other.edgeSeconds - car.edgeSeconds).abs() <= 1e-6 && other.priority > car.priority));
+      } else {
+        otherOwns = otherLeaving ||
+            otherDistance < myDistance - 0.5 ||
+            ((otherDistance - myDistance).abs() <= 0.5 && other.priority > car.priority);
+      }
+      // Попутная в моей же полосе впереди — это очередь, её держит конус.
+      if (otherOwns && !_sameLaneAhead(car, other)) {
+        return leaving ? 0.0 : math.max(0.0, myDistance - radius);
+      }
+    }
+  }
+  return null;
+}
+
+/// Едет ли [other] впереди [car] в ту же сторону по тому же ребру —
+/// тогда это очередь, а не конфликт на перекрёстке.
+bool _sameLaneAhead(TrafficCar car, TrafficCar other) =>
+    other.fromNodeId == car.fromNodeId &&
+    other.toNodeId == car.toNodeId &&
+    (other.position - car.position).dot(car.forward) > 0.0;
+
+/// На сколько метров прижаться вправо из-за встречных впереди.
+double _oncomingSqueeze(TrafficCar car, Iterable<TrafficCar> traffic) {
+  final forward = car.forward;
+  final right = rightOf(forward);
+  var squeeze = 0.0;
+  for (final other in traffic) {
+    if (identical(other, car) || forward.dot(other.forward) >= -0.7) continue;
+    final relative = other.position - car.position;
+    final along = relative.dot(forward);
+    if (along <= 0.0 || along > TrafficDriving.squeezeLookAhead) continue;
+    final lateral = relative.dot(right).abs();
+    squeeze = math.max(squeeze, ((TrafficDriving.squeezeWantedGap - lateral) / 2).clamp(0.0, TrafficDriving.maxSqueeze));
+  }
+  return squeeze;
+}
+
 /// Куда ведёт текущее ребро: точка поворота на следующее, если оно уже
 /// выбрано, иначе конец полосы.
 vm.Vector3 _edgeTarget(TrafficNetwork network, TrafficCar car) {
@@ -423,7 +628,7 @@ double _switchDistance(TrafficNetwork network, TrafficCar car) {
   final next = car.nextNodeId;
   if (next == null) return TrafficDriving.reachRadius;
   final angle = network.turnAngle(car.fromNodeId, car.toNodeId, next);
-  // Разворот вписывает отдельный режим (см. uTurnRadius) — тут просто
+  // Разворот вписывает отдельный режим (см. uTurnMinRadius) — тут просто
   // доехать до конца полосы.
   if (angle > 2.6) return TrafficDriving.reachRadius;
   return math.max(1.0, TrafficDriving.minTurnRadius * math.tan(angle / 2));

@@ -61,7 +61,13 @@ class SignalizedIntersection {
 /// Въезд на светофорный перекрёсток: по ребру [fromNodeId] -> [toNodeId]
 /// (узел перекрёстка). Для каждого рисуется свой светофор.
 class SignalApproach {
-  SignalApproach({required this.intersection, required this.fromNodeId, required this.toNodeId, required this.direction});
+  SignalApproach({
+    required this.intersection,
+    required this.fromNodeId,
+    required this.toNodeId,
+    required this.direction,
+    required this.highway,
+  });
 
   final SignalizedIntersection intersection;
   final String fromNodeId;
@@ -69,6 +75,10 @@ class SignalApproach {
 
   /// Направление движения по въезду (единичный, горизонтальный).
   final vm.Vector3 direction;
+
+  /// Тип дороги въезда — от него ширина асфальта, а значит, где тротуар
+  /// для столба (см. signalPolePosition).
+  final String highway;
 
   SignalLight lightAt(double time) => intersection.lightFor(direction, time);
 }
@@ -152,6 +162,7 @@ class TrafficSignals {
           fromNodeId: entry.key,
           toNodeId: toId,
           direction: direction.normalized(),
+          highway: network.edge(entry.key, toId)!.highway,
         ));
       }
     }

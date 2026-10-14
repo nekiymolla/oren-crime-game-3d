@@ -6,14 +6,18 @@ import 'package:vector_math/vector_math.dart' as vm;
 import 'traffic_car.dart';
 import 'traffic_signals.dart';
 
-/// Где стоит столб светофора въезда: у стоп-линии, справа от полосы, на
-/// обочине. Общая функция — та же точка проверяется пайплайном на
-/// попадание в дома (см. tools/osm_pipeline/check_road_graph.mjs).
-vm.Vector3 signalPolePosition(vm.Vector3 intersectionNode, vm.Vector3 direction) =>
-    intersectionNode - direction * signalStopLineBack + rightOf(direction) * signalPoleSideOffset;
+/// Где стоит столб светофора въезда: у стоп-линии, справа, на тротуаре —
+/// в [signalPoleCurbGap] за краем асфальта этой дороги (раньше стоял на
+/// фиксированных 4 м от оси и у узких дворовых дорог оказывался в 2 м от
+/// края, посреди газона). Та же точка проверяется пайплайном (см.
+/// tools/osm_pipeline/check_road_graph.mjs).
+vm.Vector3 signalPolePosition(vm.Vector3 intersectionNode, vm.Vector3 direction, String highway) =>
+    intersectionNode -
+    direction * signalStopLineBack +
+    rightOf(direction) * (roadHalfWidthFor(highway) + signalPoleCurbGap);
 
-/// Насколько столб правее оси дороги, метры: полоса (1.5) плюс обочина.
-const double signalPoleSideOffset = 4.0;
+/// Насколько столб за краем асфальта, метры.
+const double signalPoleCurbGap = 0.6;
 
 /// Светофоры на экране: все столбы, корпуса и лампы района — три
 /// InstancedMesh, то есть три draw call на весь город и всего три узла
@@ -44,7 +48,7 @@ class TrafficSignalsView {
     final graph = signals.network.graph;
     for (final approach in signals.approaches) {
       final node = graph.nodes[approach.toNodeId]!.toVector3();
-      final pole = signalPolePosition(node, approach.direction);
+      final pole = signalPolePosition(node, approach.direction, approach.highway);
       // Лицом к подъезжающим: "назад" по направлению въезда.
       final facing = -approach.direction;
       final yaw = math.atan2(facing.x, facing.z);

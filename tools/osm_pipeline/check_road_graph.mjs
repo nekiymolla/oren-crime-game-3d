@@ -12,8 +12,10 @@
 // пересборка карты не вернула баг молча. Код выхода 1, если нашлись рёбра.
 //
 // Трафик (lib/traffic/traffic_car.dart) ездит по правой полосе — со
-// сдвигом trafficLaneOffset от оси, поэтому для него проверяется полоса
-// целиком (оба борта кузова) в каждом разрешённом направлении ребра.
+// сдвигом laneOffsetFor(highway) от оси, поэтому для него проверяется
+// полоса целиком (оба борта кузова) в каждом разрешённом направлении ребра:
+// и что не сквозь дома, и что кузов на асфальте, а не на тротуаре/газоне
+// (14.10.2026 на узких дворовых дорогах машины свешивались на тротуар).
 //
 // Использование: node check_road_graph.mjs <chunks_dir> <road_graph.json>
 
@@ -40,8 +42,18 @@ const BODY_RADIUS = 0.3;
 const TRAFFIC_HIGHWAYS = new Set([
   'residential', 'unclassified', 'tertiary', 'secondary', 'primary', 'living_street',
 ]);
-const TRAFFIC_LANE_OFFSET = 1.5;
+const laneOffsetFor = (highway) => (highway === 'residential' || highway === 'living_street' ? 1.2 : 1.75);
 const CAR_HALF_WIDTH = 0.9;
+// Сколько борта может быть на бордюре (дворовая полоса 1.2 + 0.9 = 2.1 при
+// асфальте до ~2.0 м).
+const CURB_TOLERANCE = 0.15;
+// Доля точек под кузовом, которые обязаны быть асфальтом. Не 100%: на
+// перекрёстках и съездах osm2world кладёт другие поверхности.
+const MIN_ASPHALT_SHARE = 0.97;
+// EARTH — грунтовки (surface=unpaved, например Смоленская улица): дорога,
+// просто без асфальта. Плитка (PAVING_STONE) — пешеходные площади, по ним
+// машинам нельзя.
+const isRoadSurface = (material) => /ASPHALT|road_marking|EARTH/.test(material);
 const SAMPLE_STEP = 0.5;
 const GRID_CELL = 4;
 
@@ -53,6 +65,7 @@ if (!chunksDir || !graphPath) {
 
 // Все треугольники чанков в мировых координатах + сетка для быстрого поиска.
 const triangles = [];
+const triangleMaterials = [];
 const grid = new Map();
 const cellKey = (i, j) => `${i},${j}`;
 
@@ -70,6 +83,7 @@ for (const file of fs.readdirSync(chunksDir).filter((f) => f.endsWith('.glb'))) 
     if (!mesh) continue;
     const matrix = node.getWorldMatrix();
     for (const primitive of mesh.listPrimitives()) {
+      const material = primitive.getMaterial()?.getName() ?? '';
       const positions = primitive.getAttribute('POSITION');
       const indices = primitive.getIndices();
       const count = indices ? indices.getCount() : positions.getCount();
@@ -82,6 +96,7 @@ for (const file of fs.readdirSync(chunksDir).filter((f) => f.endsWith('.glb'))) 
         }
         const id = triangles.length;
         triangles.push(tri);
+        triangleMaterials.push(material);
         const xs = tri.map((p) => p[0]);
         const zs = tri.map((p) => p[2]);
         for (let i = Math.floor(Math.min(...xs) / GRID_CELL); i <= Math.floor(Math.max(...xs) / GRID_CELL); i++) {
@@ -99,6 +114,12 @@ for (const file of fs.readdirSync(chunksDir).filter((f) => f.endsWith('.glb'))) 
 // Высота самой верхней геометрии над точкой (x, z) — как вертикальный луч
 // сверху вниз; null, если там ничего нет (плейсхолдер-земля).
 function topHeightAt(x, z) {
+  return topSurfaceAt(x, z)?.y ?? null;
+}
+
+// То же, но с материалом поверхности. Выше ROOF_MAX_HEIGHT — служебный
+// якорный узел, не мир.
+function topSurfaceAt(x, z) {
   let best = null;
   for (const id of grid.get(cellKey(Math.floor(x / GRID_CELL), Math.floor(z / GRID_CELL))) ?? []) {
     const [a, b, c] = triangles[id];
@@ -109,7 +130,7 @@ function topHeightAt(x, z) {
     const l3 = 1 - l1 - l2;
     if (l1 < 0 || l2 < 0 || l3 < 0) continue;
     const y = l1 * a[1] + l2 * b[1] + l3 * c[1];
-    if (best === null || y > best) best = y;
+    if (y < ROOF_MAX_HEIGHT && (best === null || y > best.y)) best = { y, material: triangleMaterials[id] };
   }
   return best;
 }
@@ -160,7 +181,7 @@ let failed = false;
   const blocked = [];
   for (const edge of graph.edges) {
     if (!TRAFFIC_HIGHWAYS.has(edge.highway)) continue;
-    const center = edge.oneway ? 0 : TRAFFIC_LANE_OFFSET;
+    const center = edge.oneway ? 0 : laneOffsetFor(edge.highway);
     const offsets = [center - CAR_HALF_WIDTH, center, center + CAR_HALF_WIDTH];
     const directions = edge.oneway ? [[edge.from, edge.to]] : [[edge.from, edge.to], [edge.to, edge.from]];
     for (const [from, to] of directions) {
@@ -170,6 +191,46 @@ let failed = false;
     }
   }
   report(`Трафик: проверено ${checked} полос`, blocked);
+}
+
+// Трафик: кузов на асфальте — центр полосы и оба борта (минус допуск на
+// бордюр), каждые SAMPLE_STEP метров, без 3 м у узлов (там перекрёсток).
+{
+  let samples = 0;
+  let onRoad = 0;
+  const worst = [];
+  for (const edge of graph.edges) {
+    if (!TRAFFIC_HIGHWAYS.has(edge.highway)) continue;
+    const center = edge.oneway ? 0 : laneOffsetFor(edge.highway);
+    const side = CAR_HALF_WIDTH - CURB_TOLERANCE;
+    const directions = edge.oneway ? [[edge.from, edge.to]] : [[edge.from, edge.to], [edge.to, edge.from]];
+    for (const [from, to] of directions) {
+      const a = nodes[from];
+      const b = nodes[to];
+      const length = Math.hypot(b.x - a.x, b.z - a.z);
+      if (length < 7) continue;
+      const ux = (b.x - a.x) / length;
+      const uz = (b.z - a.z) / length;
+      let edgeSamples = 0;
+      let edgeOnRoad = 0;
+      for (let s = 3; s <= length - 3; s += SAMPLE_STEP) {
+        for (const offset of [center - side, center, center + side]) {
+          const surface = topSurfaceAt(a.x + ux * s - uz * offset, a.z + uz * s + ux * offset);
+          edgeSamples++;
+          if (surface && isRoadSurface(surface.material)) edgeOnRoad++;
+        }
+      }
+      samples += edgeSamples;
+      onRoad += edgeOnRoad;
+      if (edgeSamples > 0 && edgeOnRoad / edgeSamples < 0.9) {
+        worst.push({ highway: edge.highway, from, to, onRoad: +(edgeOnRoad / edgeSamples).toFixed(2) });
+      }
+    }
+  }
+  const share = samples ? onRoad / samples : 1;
+  console.log(`Трафик: под кузовом проезжая часть в ${(share * 100).toFixed(1)}% точек (нужно ${MIN_ASPHALT_SHARE * 100}%), полос хуже 90%: ${worst.length}`);
+  for (const w of worst.slice(0, 10)) console.log('  ', JSON.stringify(w));
+  if (share < MIN_ASPHALT_SHARE) failed = true;
 }
 
 function report(title, blocked) {

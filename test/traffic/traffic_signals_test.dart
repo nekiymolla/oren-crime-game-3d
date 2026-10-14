@@ -92,7 +92,7 @@ void main() {
     }
 
     final car = TrafficCar(
-      position: vm.Vector3(-60, 0, trafficLaneOffset),
+      position: vm.Vector3(-60, 0, laneOffsetFor('residential')),
       heading: math.pi / 2,
       fromNodeId: 'w',
       toNodeId: 'c',
