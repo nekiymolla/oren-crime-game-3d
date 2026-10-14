@@ -12,6 +12,8 @@ import '../player/player_input_bridge_component.dart';
 import '../police/arrest_state.dart';
 import '../police/police_system.dart';
 import '../traffic/traffic_car.dart';
+import '../traffic/traffic_signals.dart';
+import '../traffic/traffic_signals_view.dart';
 import '../traffic/traffic_system.dart';
 import '../police/wanted_state.dart';
 import '../police/wanted_system.dart';
@@ -60,6 +62,9 @@ class Game {
   late final PedestrianSystem pedestrians;
   late final PoliceSystem policeSystem;
   late final TrafficSystem traffic;
+  late final TrafficSignals signals;
+  late final TrafficSignalsView _signalsView;
+  late final RedLightDetector _redLightDetector;
   late final WorldConfig worldConfig;
   final WantedSystem wantedSystem = WantedSystem();
 
@@ -174,9 +179,15 @@ class Game {
       scene.add(_pedestrianDebugLinesNode!);
     }
     policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene);
+    final trafficNetwork = TrafficNetwork(roadGraph);
+    signals = TrafficSignals.fromNetwork(trafficNetwork);
+    _signalsView = TrafficSignalsView(signals);
+    scene.add(_signalsView.buildNode());
+    _redLightDetector = RedLightDetector(signals);
     traffic = TrafficSystem(
-      network: TrafficNetwork(roadGraph),
+      network: trafficNetwork,
       scene: scene,
+      signals: signals,
       population: quality.trafficPopulation,
     );
 
@@ -408,7 +419,7 @@ class Game {
 
     final left = vm.Vector3(math.cos(car.heading), 0, -math.sin(car.heading));
     pedestrians.spawnFleeingDriver(car.position + left * 1.6, playerNode.globalTransform.getTranslation());
-    wantedSystem.reportCarjack();
+    wantedSystem.reportMinorCrime();
   }
 
   void _parkPlayerCar(BuiltVehicle car) {
@@ -561,7 +572,17 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
+    signals.advance(deltaSeconds);
+    _signalsView.update();
     traffic.update(deltaSeconds, trackedPosition, external: _trafficObstacles(isDriving));
+    // Проезд на красный — только за рулём; детектор держит "в каком
+    // перекрёстке был", поэтому зовётся каждый кадр, а пешком — с нулевой
+    // скоростью (не нарушение, но зона перекрёстка обновляется).
+    final ranRedLight = _redLightDetector.update(
+      trackedPosition,
+      isDriving ? vehicle.controller.velocityXZ : vm.Vector2.zero(),
+    );
+    if (ranRedLight) wantedSystem.reportMinorCrime();
 
     final caught = policeSystem.update(deltaSeconds, trackedPosition);
     if (caught) _handleArrest();

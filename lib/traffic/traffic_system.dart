@@ -5,6 +5,7 @@ import 'package:vector_math/vector_math.dart' as vm;
 
 import '../vehicles/vehicle.dart';
 import 'traffic_car.dart';
+import 'traffic_signals.dart';
 
 class _TrafficUnit {
   _TrafficUnit(this.car, this.node, this.look);
@@ -34,6 +35,7 @@ class TrafficSystem {
   TrafficSystem({
     required this.network,
     required this.scene,
+    this.signals,
     this.population = 8,
     this.initialMinDistance = 25.0,
     this.respawnMinDistance = 70.0,
@@ -44,6 +46,9 @@ class TrafficSystem {
 
   final TrafficNetwork network;
   final Scene scene;
+
+  /// Светофоры — машины встают на красный. null — город без светофоров.
+  final TrafficSignals? signals;
   final int population;
   final double initialMinDistance;
   final double respawnMinDistance;
@@ -59,7 +64,7 @@ class TrafficSystem {
 
   /// Застрявшую дольше этого машину переселяем — но только вдали от игрока
   /// (см. [_stuckRespawnDistance]), чтобы она не пропала у него на глазах.
-  static const double _stuckSeconds = 20.0;
+  static const double _stuckSeconds = 45.0;
   static const double _stuckRespawnDistance = 60.0;
 
   /// Не ставить новую машину ближе этого к другой.
@@ -141,6 +146,7 @@ class TrafficSystem {
         random: _random,
         obstacles: externalList,
         traffic: cars,
+        signals: signals,
       );
 
       final distanceSq = (unit.car.position - trackedPosition).length2;

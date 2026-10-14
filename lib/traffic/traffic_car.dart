@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../world/road_graph.dart';
+import 'traffic_signals.dart';
 
 /// Типы `highway`, по которым ездит фоновый трафик. Как vehicleHighwayTypes
 /// у полиции, но БЕЗ `service`: это проезды к подъездам и парковки, и
@@ -237,6 +238,9 @@ abstract final class TrafficDriving {
   /// поэтому зона чуть уже.
   static const double nearFieldAhead = 8.0;
   static const double nearFieldLateral = 2.7;
+
+  /// Вплотную ближе этого — правило "кто сзади, тот уступает".
+  static const double bubble = 6.0;
 }
 
 /// Один шаг машины трафика. Возвращает false, если ехать дальше некуда
@@ -248,6 +252,7 @@ bool stepTrafficCar(
   required math.Random random,
   Iterable<TrafficObstacle> obstacles = const [],
   Iterable<TrafficCar> traffic = const [],
+  TrafficSignals? signals,
 }) {
   if (dt <= 0.0) return true;
 
@@ -262,7 +267,10 @@ bool stepTrafficCar(
   var target = _edgeTarget(network, car);
   final edgeDirection = _edgeDirection(network, car.fromNodeId, car.toNodeId);
   final ahead = edgeDirection == null ? 0.0 : (target - car.position).dot(edgeDirection);
-  if (ahead <= _switchDistance(network, car)) {
+  // Перед красным на ребро поворота не переключаемся: на острых поворотах
+  // вписывание начинается раньше стоп-линии, и машина проскочила бы её.
+  final waitsAtSignal = _signalStopDistance(car, network, signals) != null;
+  if (ahead <= _switchDistance(network, car) && !waitsAtSignal) {
     final next = car.nextNodeId;
     if (next == null) {
       car.speed = 0.0;
@@ -293,6 +301,12 @@ bool stepTrafficCar(
   } else {
     // Тупик без выезда — подъезжаем и встаём.
     desired = math.min(desired, math.sqrt(2 * TrafficDriving.comfortDecel * distanceToNode));
+  }
+
+  // 2б. Светофор на конце ребра — встаём у стоп-линии.
+  final stopDistance = _signalStopDistance(car, network, signals);
+  if (stopDistance != null) {
+    desired = math.min(desired, math.sqrt(2 * TrafficDriving.comfortDecel * stopDistance));
   }
 
   // 3. Курс — на точку линии полосы в нескольких метрах впереди проекции
@@ -342,7 +356,18 @@ bool stepTrafficCar(
     final yieldsSideways = along <= TrafficDriving.nearFieldAhead &&
         lateral <= TrafficDriving.nearFieldLateral &&
         other.priority > car.priority;
-    if (!inLane && !yieldsSideways) continue;
+    // Вплотную (слияние на перекрёстке: две машины свернули на одно ребро
+    // с разных сторон) — уступает та, что сзади: сосед впереди меня больше,
+    // чем я впереди него. При ничьей — приоритет. Правило несимметричное,
+    // так что вечного взаимного уступания нет (симуляция: без него центры
+    // сходились на 0.7 м).
+    var yieldsBehind = false;
+    if (relative.length2 < TrafficDriving.bubble * TrafficDriving.bubble) {
+      final theirAlong = -relative.dot(other.forward);
+      yieldsBehind = along > theirAlong + 0.3 ||
+          ((along - theirAlong).abs() <= 0.3 && other.priority > car.priority);
+    }
+    if (!inLane && !yieldsSideways && !yieldsBehind) continue;
     final gap = along - halfWidth - TrafficDriving.stopGap;
     desired = math.min(desired, gap <= 0.0 ? 0.0 : math.sqrt(2 * TrafficDriving.comfortDecel * gap));
   }
@@ -364,6 +389,24 @@ bool stepTrafficCar(
   car.position += car.forward * (car.speed * dt);
   car.stoppedSeconds = car.speed < 0.3 ? car.stoppedSeconds + dt : 0.0;
   return true;
+}
+
+/// Сколько осталось до стоп-линии, если перед ней надо встать (красный;
+/// жёлтый — только если успеваем мягко, иначе проезжаем, как живой
+/// водитель), или null — ехать.
+double? _signalStopDistance(TrafficCar car, TrafficNetwork network, TrafficSignals? signals) {
+  if (signals == null) return null;
+  final light = signals.lightForEdge(car.fromNodeId, car.toNodeId);
+  if (light == null || light == SignalLight.green) return null;
+  final node = network.graph.nodes[car.toNodeId];
+  final direction = _edgeDirection(network, car.fromNodeId, car.toNodeId);
+  if (node == null || direction == null) return null;
+  final stop = (node.toVector3() - car.position).dot(direction) - signalStopLineBack;
+  if (stop < -0.5) return null; // уже за линией — освобождаем перекрёсток
+  if (light == SignalLight.yellow && stop < car.speed * car.speed / (2 * TrafficDriving.comfortDecel)) {
+    return null;
+  }
+  return math.max(0.0, stop);
 }
 
 /// Куда ведёт текущее ребро: точка поворота на следующее, если оно уже

@@ -55,14 +55,14 @@ void carjackTests() {
   test('угон даёт звезду и сбрасывает затухание', () {
     wantedState.stars = 0;
     final system = WantedSystem(decayIntervalSeconds: 10);
-    system.reportCarjack();
+    system.reportMinorCrime();
     expect(wantedState.stars, 1);
     system.update(9.0);
-    system.reportCarjack();
+    system.reportMinorCrime();
     system.update(9.0);
     expect(wantedState.stars, 1); // отсчёт начался заново после угона
     wantedState.stars = 3;
-    system.reportCarjack();
+    system.reportMinorCrime();
     expect(wantedState.stars, 3); // не понижает
   });
 }

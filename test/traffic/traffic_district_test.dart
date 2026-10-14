@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:crime_oren/traffic/traffic_car.dart';
+import 'package:crime_oren/traffic/traffic_signals.dart';
 import 'package:crime_oren/world/road_graph.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vector_math/vector_math.dart' as vm;
@@ -71,21 +72,24 @@ void main() {
     return cars;
   }
 
-  for (final (seed, count) in [(42, 10), (7, 15), (2026, 15)]) {
+  for (final (seed, count) in [(42, 10), (7, 15), (2026, 15), (11, 15), (99, 15)]) {
     test(
       '$count машин 5 минут по району (сид $seed): на дороге, без наложений, без вечных пробок',
       () {
         final random = math.Random(seed);
         final cars = spawn(random, count);
         const dt = 1 / 30;
+        final signals = TrafficSignals.fromNetwork(network);
         var worstOffRoad = 0.0;
         var closest = double.infinity;
         var maxStopped = 0.0;
+        var closestInfo = '';
         String? worstOffRoadInfo;
 
         for (var step = 0; step < 5 * 60 * 30; step++) {
+          signals.advance(dt);
           for (final car in cars) {
-            stepTrafficCar(car, network, dt: dt, random: random, traffic: cars);
+            stepTrafficCar(car, network, dt: dt, random: random, traffic: cars, signals: signals);
             maxStopped = math.max(maxStopped, car.stoppedSeconds);
           }
           if (step % 15 == 0) {
@@ -100,15 +104,21 @@ void main() {
           }
           for (var i = 0; i < cars.length; i++) {
             for (var j = i + 1; j < cars.length; j++) {
-              closest = math.min(
-                closest,
-                (cars[i].position - cars[j].position).length,
-              );
+              final d = (cars[i].position - cars[j].position).length;
+              if (d < closest) {
+                closest = d;
+                String info(TrafficCar c) =>
+                    '${c.fromNodeId}->${c.toNodeId}->${c.nextNodeId} '
+                    'pos=${c.position.x.toStringAsFixed(1)},${c.position.z.toStringAsFixed(1)} '
+                    'hdg=${c.heading.toStringAsFixed(2)} v=${c.speed.toStringAsFixed(1)} '
+                    'prio=${c.priority} uturn=${c.isTurningAround}';
+                closestInfo = 't=${(step * dt).toStringAsFixed(1)}\n  ${info(cars[i])}\n  ${info(cars[j])}';
+              }
             }
           }
         }
 
-        for (final car in cars.where((c) => c.stoppedSeconds > 30)) {
+        for (final car in cars.where((c) => c.stoppedSeconds > SignalTiming.cycle * 1.5)) {
           // ignore: avoid_print
           print('СТОИТ prio=${car.priority} ${car.fromNodeId}->${car.toNodeId}->${car.nextNodeId} '
               'pos=${car.position} hdg=${car.heading.toStringAsFixed(2)} uturn=${car.isTurningAround}');
@@ -126,11 +136,13 @@ void main() {
         // ignore: avoid_print
         print(
           'съезд с оси макс ${worstOffRoad.toStringAsFixed(2)} м ($worstOffRoadInfo), '
-          'ближе всего машины ${closest.toStringAsFixed(2)} м, дольше всего стояла ${maxStopped.toStringAsFixed(1)} с',
+          'ближе всего машины ${closest.toStringAsFixed(2)} м ($closestInfo), дольше всего стояла ${maxStopped.toStringAsFixed(1)} с',
         );
         expect(worstOffRoad, lessThan(4.0));
         expect(closest, greaterThan(2.0));
-        expect(maxStopped, lessThan(30.0));
+        // Красный длится до фазы соседнего направления плюс очередь — вечная
+        // пробка видна как стоянка в разы дольше цикла.
+        expect(maxStopped, lessThan(SignalTiming.cycle * 1.5));
       },
     );
   }

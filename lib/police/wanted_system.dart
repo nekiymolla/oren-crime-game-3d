@@ -18,9 +18,10 @@ class WantedSystem {
 
   double _secondsSinceOffense = 0.0;
 
-  /// Угон машины — как и превышение, само по себе даёт одну звезду, но
-  /// сбрасывает отсчёт затухания и при уже идущем розыске.
-  void reportCarjack() {
+  /// Мелкое преступление (угон машины, проезд на красный) — как и
+  /// превышение, само по себе даёт одну звезду, но сбрасывает отсчёт
+  /// затухания и при уже идущем розыске.
+  void reportMinorCrime() {
     if (wantedState.stars == 0) wantedState.stars = 1;
     _secondsSinceOffense = 0.0;
   }
