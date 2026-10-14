@@ -16,6 +16,7 @@ import '../traffic/traffic_system.dart';
 import '../police/wanted_state.dart';
 import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
+import '../vehicles/vehicle_spec.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
 import '../world/road_graph.dart';
@@ -26,6 +27,9 @@ import '../world/world_config.dart';
 /// Чистый Dart-класс без импорта Flutter — владеет сценой и игровым
 /// состоянием. Виджет (см. game_view.dart) только строит его и пробрасывает
 /// тики; вся геймплейная логика живёт здесь и в компонентах узлов.
+/// Что делает кнопка машины в HUD (см. [Game.vehicleInteraction]).
+enum VehicleInteraction { enter, exit, carjack }
+
 class Game {
   Game({this.debugShowRoadGraph = false});
 
@@ -39,7 +43,19 @@ class Game {
   final Scene scene = Scene();
   late final Node playerNode;
   late final Node cameraNode;
-  late final BuiltVehicle vehicle;
+  /// Машина, за рулём которой игрок или в которую садился последней.
+  /// Меняется при угоне (см. [_carjack]) и при пересадке в брошенную.
+  late BuiltVehicle vehicle;
+
+  /// Машины игрока, брошенные в мире (своя после угона, прошлые угнанные)
+  /// — в них можно вернуться. Не больше [_maxParkedPlayerCars]: каждая —
+  /// отдельный узел с контроллером, копить их весь сеанс незачем.
+  final List<BuiltVehicle> _parkedPlayerCars = [];
+  static const int _maxParkedPlayerCars = 3;
+
+  /// Числа вождения угнанной машины — грузятся в load(), потому что сам
+  /// угон синхронный (по нажатию кнопки).
+  late final VehicleSpec _stolenCarSpec;
   late final DistrictStreamer districtStreamer;
   late final PedestrianSystem pedestrians;
   late final PoliceSystem policeSystem;
@@ -104,6 +120,10 @@ class Game {
   /// Насколько близко нужно быть к машине, чтобы сесть в неё. Публичный —
   /// GameHud использует то же число, чтобы решать, показывать ли кнопку.
   static const double vehicleInteractRadius = 4.0;
+
+  /// Быстрее этого машину потока не угнать — с ходу на скорости водителя
+  /// не выдернешь. Трафик сам тормозит перед стоящим на дороге игроком.
+  static const double _carjackMaxSpeed = 4.0;
 
   /// true, пока игрок сам крутит камеру пальцем (см. GameHud) — авто-довод
   /// камеры за курсом машины в это время не работает, чтобы не бороться с
@@ -201,6 +221,7 @@ class Game {
     // Рядом со спавном игрока (см. WorldConfig.playerSpawnPosition) — тот же
     // открытый парк, чтобы машина была видна и доступна сразу.
     vehicle = await buildPlaceholderSedan();
+    _stolenCarSpec = await loadVehicleSpec('car_sedan_01') ?? fallbackVehicleSpec;
     vehicle.node.position = worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
     scene.add(vehicle.node);
 
@@ -220,7 +241,9 @@ class Game {
     // добавляются отдельными корнями (и только когда игрок рядом, иначе
     // каждый луч обходил бы их поддеревья впустую). Патрульные машины
     // приходят колбэком: их набор меняется по звёздам розыска.
-    collisionField.addColliderSource(() => [vehicle.node, parkedHatchback, parkedPickup]);
+    collisionField.addColliderSource(
+      () => [vehicle.node, for (final car in _parkedPlayerCars) car.node, parkedHatchback, parkedPickup],
+    );
     collisionField.addColliderSource(() => policeSystem.unitNodes);
     collisionField.addColliderSource(() => traffic.carNodes);
 
@@ -303,22 +326,95 @@ class Game {
     _movement?.bodyRadius = value ? _defaultObstacleRadius : 0.0;
   }
 
-  /// Сесть в машину / выйти из неё — не даёт сработать, если игрок дальше
-  /// [_vehicleInteractRadius] от машины. Переключает и куда едет камера, и
-  /// откуда читается джойстик (см. [GameModeState]).
+  /// Что сейчас сделает кнопка машины (null — ничего, кнопку не
+  /// показывать). Зовётся HUD-ом каждый кадр, поэтому без аллокаций сверх
+  /// поиска ближайшей машины.
+  VehicleInteraction? get vehicleInteraction {
+    if (gameModeState.mode == ControlMode.driving) return VehicleInteraction.exit;
+    final target = _nearestEnterable();
+    if (target == null) return null;
+    return target.stolen != null ? VehicleInteraction.carjack : VehicleInteraction.enter;
+  }
+
+  /// Ближайшая машина в радиусе посадки: своя (текущая или брошенная) или
+  /// машина потока, которую можно угнать.
+  ({BuiltVehicle? own, StealableCar? stolen})? _nearestEnterable() {
+    final playerPos = playerNode.globalTransform.getTranslation();
+    BuiltVehicle? own;
+    var ownDistance = vehicleInteractRadius;
+    for (final car in [vehicle, ..._parkedPlayerCars]) {
+      final distance = (car.node.globalTransform.getTranslation() - playerPos).length;
+      if (distance <= ownDistance) {
+        ownDistance = distance;
+        own = car;
+      }
+    }
+    final stolen = traffic.stealableNear(playerPos, radius: vehicleInteractRadius, maxSpeed: _carjackMaxSpeed);
+    if (stolen != null && (own == null || (stolen.car.position - playerPos).length < ownDistance)) {
+      return (own: null, stolen: stolen);
+    }
+    return own == null ? null : (own: own, stolen: null);
+  }
+
+  /// Сесть в машину (свою или угнать из потока) / выйти — по ближайшей
+  /// цели [vehicleInteraction]. Переключает и куда едет камера, и откуда
+  /// читается джойстик (см. [GameModeState]).
   void toggleVehicle() {
-    final vehiclePos = vehicle.node.globalTransform.getTranslation();
-    if (gameModeState.mode == ControlMode.onFoot) {
-      final playerPos = playerNode.globalTransform.getTranslation();
-      if ((playerPos - vehiclePos).length > vehicleInteractRadius) return;
-      gameModeState.mode = ControlMode.driving;
-      _playerMeshNode?.visible = false;
-      cameraController.followTarget = vehicle.node;
-    } else {
+    if (gameModeState.mode == ControlMode.driving) {
+      final vehiclePos = vehicle.node.globalTransform.getTranslation();
+      final heading = vehicle.controller.heading;
+      // Выходим с водительской стороны (слева), а не всегда в +X мира:
+      // так игрок не оказывается в доме или под колёсами соседа.
+      final left = vm.Vector3(math.cos(heading), 0, -math.sin(heading));
       gameModeState.mode = ControlMode.onFoot;
-      playerNode.position = vehiclePos + vm.Vector3(2.2, 0, 0);
+      playerNode.position = vehiclePos + left * 2.0;
       _playerMeshNode?.visible = true;
       cameraController.followTarget = playerNode;
+      return;
+    }
+
+    final target = _nearestEnterable();
+    if (target == null) return;
+    final stolen = target.stolen;
+    if (stolen != null) {
+      _carjack(stolen);
+    } else if (!identical(target.own, vehicle)) {
+      _parkedPlayerCars.remove(target.own);
+      _parkPlayerCar(vehicle);
+      vehicle = target.own!;
+    }
+    gameModeState
+      ..mode = ControlMode.driving
+      ..activeVehicle = vehicle.controller;
+    _playerMeshNode?.visible = false;
+    cameraController.followTarget = vehicle.node;
+  }
+
+  /// Угон: машина уходит из потока, на её месте собирается управляемая
+  /// того же вида, водитель выскакивает и убегает, розыск — звезда.
+  void _carjack(StealableCar stolen) {
+    final car = stolen.car;
+    traffic.removeCar(car);
+
+    final built = buildVehicleWithSpec(stolen.look, _stolenCarSpec);
+    built.node
+      ..position = car.position
+      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), car.heading);
+    built.controller.heading = car.heading;
+    scene.add(built.node);
+
+    _parkPlayerCar(vehicle);
+    vehicle = built;
+
+    final left = vm.Vector3(math.cos(car.heading), 0, -math.sin(car.heading));
+    pedestrians.spawnFleeingDriver(car.position + left * 1.6, playerNode.globalTransform.getTranslation());
+    wantedSystem.reportCarjack();
+  }
+
+  void _parkPlayerCar(BuiltVehicle car) {
+    _parkedPlayerCars.add(car);
+    if (_parkedPlayerCars.length > _maxParkedPlayerCars) {
+      scene.remove(_parkedPlayerCars.removeAt(0).node);
     }
   }
 
@@ -484,6 +580,9 @@ class Game {
       yield (position: playerNode.globalTransform.getTranslation(), radius: _playerCapsuleRadius);
       // Пустая машина игрока тоже стоит где-то — возможно, посреди дороги.
       yield (position: vehicle.node.globalTransform.getTranslation(), radius: 1.0);
+    }
+    for (final car in _parkedPlayerCars) {
+      yield (position: car.node.globalTransform.getTranslation(), radius: 1.0);
     }
     for (final node in policeSystem.unitNodes) {
       yield (position: node.globalTransform.getTranslation(), radius: 1.0);

@@ -7,11 +7,17 @@ import '../vehicles/vehicle.dart';
 import 'traffic_car.dart';
 
 class _TrafficUnit {
-  _TrafficUnit(this.car, this.node);
+  _TrafficUnit(this.car, this.node, this.look);
 
   final TrafficCar car;
   final Node node;
+
+  /// Силуэт и цвет — чтобы угнанная машина выглядела так же, как ехала.
+  final VehicleDimensions look;
 }
+
+/// Машина потока, которую можно угнать (см. [TrafficSystem.stealableNear]).
+typedef StealableCar = ({TrafficCar car, VehicleDimensions look});
 
 /// Фоновый трафик: [population] машин ездят по дорогам вокруг игрока (см.
 /// traffic_car.dart — сама езда проверена юнит-тестами отдельно от рендера).
@@ -76,21 +82,52 @@ class TrafficSystem {
   Iterable<TrafficObstacle> get obstacles =>
       _units.map((unit) => (position: unit.car.position, radius: obstacleRadius));
 
+  /// Ближайшая к [position] машина потока не дальше [radius], едущая не
+  /// быстрее [maxSpeed] — с ходу на скорости из машины не выдернешь.
+  StealableCar? stealableNear(vm.Vector3 position, {required double radius, required double maxSpeed}) {
+    _TrafficUnit? best;
+    var bestSq = radius * radius;
+    for (final unit in _units) {
+      if (unit.car.speed > maxSpeed) continue;
+      final distanceSq = (unit.car.position - position).length2;
+      if (distanceSq <= bestSq) {
+        bestSq = distanceSq;
+        best = unit;
+      }
+    }
+    return best == null ? null : (car: best.car, look: best.look);
+  }
+
+  /// Убирает машину из потока (её угнали — дальше это машина игрока).
+  /// Поток пополняется до [population] в следующих кадрах, в кольце
+  /// подальше от игрока.
+  void removeCar(TrafficCar car) {
+    final index = _units.indexWhere((unit) => identical(unit.car, car));
+    if (index < 0) return;
+    scene.remove(_units[index].node);
+    _units.removeAt(index);
+  }
+
   /// Зовётся каждый кадр из Game.tick(). [external] — то, перед чем машины
   /// должны тормозить помимо друг друга: игрок, его машина, полиция,
   /// пешеходы.
   void update(double dt, vm.Vector3 trackedPosition, {Iterable<TrafficObstacle> external = const []}) {
-    if (!_spawned) {
-      _spawned = true;
-      for (var i = 0; i < population; i++) {
-        final car = _spawnCar(trackedPosition, initialMinDistance, respawnMaxDistance);
-        if (car == null) break;
-        final node = _buildCarNode();
-        scene.add(node);
-        final unit = _TrafficUnit(car, node);
-        _units.add(unit);
-        _syncNode(unit);
-      }
+    // Первый кадр — вся популяция, ближе обычного; дальше — пополнение
+    // (после угона) по одной машине за кадр в дальнем кольце.
+    final isFirstFrame = !_spawned;
+    _spawned = true;
+    while (_units.length < population) {
+      final car = isFirstFrame
+          ? _spawnCar(trackedPosition, initialMinDistance, respawnMaxDistance)
+          : _spawnCar(trackedPosition, respawnMinDistance, respawnMaxDistance);
+      if (car == null) break;
+      final look = _randomLook();
+      final node = buildStaticVehicleVisual(look);
+      scene.add(node);
+      final unit = _TrafficUnit(car, node, look);
+      _units.add(unit);
+      _syncNode(unit);
+      if (!isFirstFrame) break;
     }
 
     final externalList = external.toList();
@@ -135,10 +172,10 @@ class TrafficSystem {
       ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), unit.car.heading);
   }
 
-  Node _buildCarNode() {
+  VehicleDimensions _randomLook() {
     final archetypes = [VehicleArchetype.sedan, VehicleArchetype.hatchback, VehicleArchetype.pickup];
     final base = archetypes[_random.nextInt(archetypes.length)];
-    return buildStaticVehicleVisual(base.withPaint(_paints[_random.nextInt(_paints.length)]));
+    return base.withPaint(_paints[_random.nextInt(_paints.length)]);
   }
 
   /// Машина в начале случайного ребра трафика, начало которого в кольце

@@ -3,6 +3,8 @@ import 'package:crime_oren/police/wanted_system.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  carjackTests();
+
   setUp(() => wantedState.stars = 0);
 
   test('наезд на пешехода поднимает звёзды на число сбитых', () {
@@ -46,5 +48,21 @@ void main() {
 
     system.update(4.0); // отсчёт должен был сброситься новым нарушением
     expect(wantedState.stars, 2);
+  });
+}
+
+void carjackTests() {
+  test('угон даёт звезду и сбрасывает затухание', () {
+    wantedState.stars = 0;
+    final system = WantedSystem(decayIntervalSeconds: 10);
+    system.reportCarjack();
+    expect(wantedState.stars, 1);
+    system.update(9.0);
+    system.reportCarjack();
+    system.update(9.0);
+    expect(wantedState.stars, 1); // отсчёт начался заново после угона
+    wantedState.stars = 3;
+    system.reportCarjack();
+    expect(wantedState.stars, 3); // не понижает
   });
 }

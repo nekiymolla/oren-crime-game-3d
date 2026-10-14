@@ -5,7 +5,9 @@ import '../core/input/input_state.dart';
 import 'vehicle_controller_component.dart';
 
 /// Передаёт джойстик в машину, только когда активен режим вождения (см.
-/// [GameModeState]) — тот же джойстик, что и для ходьбы, но x = руль,
+/// [GameModeState]) и именно эта машина — та, за рулём которой игрок
+/// ([GameModeState.activeVehicle]): иначе после угона джойстик рулил бы
+/// заодно и брошенной машиной — тот же джойстик, что и для ходьбы, но x = руль,
 /// y = газ/тормоз. Отдельные педали/руль — будущее улучшение управления.
 class VehicleInputBridgeComponent extends Component {
   VehicleInputBridgeComponent(this.controller);
@@ -14,7 +16,7 @@ class VehicleInputBridgeComponent extends Component {
 
   @override
   void update(double deltaSeconds) {
-    if (gameModeState.mode != ControlMode.driving) {
+    if (gameModeState.mode != ControlMode.driving || !identical(gameModeState.activeVehicle, controller)) {
       controller.setInput(throttle: 0, steer: 0);
       return;
     }

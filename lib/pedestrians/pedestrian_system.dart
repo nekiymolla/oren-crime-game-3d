@@ -241,6 +241,61 @@ class PedestrianSystem {
     }
   }
 
+  /// Водитель угнанной машины выскакивает в [door] и в панике бежит к
+  /// ближайшему узлу пешеходного графа, а оттуда дальше по графу — прочь
+  /// от [awayFrom] (игрока), если есть выбор. Отдельного NPC не заводим:
+  /// популяция фиксирована, так что "водителем" становится самый дальний
+  /// от места пешеход (его исчезновение вдали никто не видит).
+  void spawnFleeingDriver(vm.Vector3 door, vm.Vector3 awayFrom) {
+    if (_pedestrians.isEmpty) return;
+    Pedestrian? farthest;
+    var farthestSq = -1.0;
+    for (final pedestrian in _pedestrians) {
+      final distanceSq = (pedestrian.position - door).length2;
+      if (distanceSq > farthestSq) {
+        farthestSq = distanceSq;
+        farthest = pedestrian;
+      }
+    }
+    final driver = farthest!;
+
+    final start = _nearestWalkableNode(door);
+    final neighbors = adjacency[start.id] ?? const <String>[];
+    var target = neighbors.isEmpty ? start.id : neighbors.first;
+    var bestScore = double.negativeInfinity;
+    for (final id in neighbors) {
+      final node = graph.nodes[id];
+      if (node == null) continue;
+      final score = (node.toVector3() - awayFrom).length2;
+      if (score > bestScore) {
+        bestScore = score;
+        target = id;
+      }
+    }
+
+    driver
+      ..position = door.clone()
+      ..currentNodeId = start.id
+      ..targetNodeId = target
+      ..returnPoint = start.toVector3()
+      ..knockedDownSeconds = 0.0
+      ..panicSeconds = 8.0;
+  }
+
+  RoadGraphNode _nearestWalkableNode(vm.Vector3 position) {
+    RoadGraphNode? best;
+    var bestSq = double.infinity;
+    for (final node in graph.nodes.values) {
+      if (adjacency[node.id]?.isEmpty ?? true) continue;
+      final distanceSq = (node.toVector3() - position).length2;
+      if (distanceSq < bestSq) {
+        bestSq = distanceSq;
+        best = node;
+      }
+    }
+    return best!;
+  }
+
   /// Ушедший за [despawnRadius] пешеход переселяется — но не куда попало в
   /// [spawnRadius], а в кольцо от [minRespawnDistance]: раньше он мог
   /// возникнуть прямо перед игроком из воздуха. Камера здесь сознательно не
@@ -253,6 +308,7 @@ class PedestrianSystem {
       ..currentNodeId = fresh.currentNodeId
       ..targetNodeId = fresh.targetNodeId
       ..knockedDownSeconds = 0.0
+      ..panicSeconds = 0.0
       ..returnPoint = null;
   }
 

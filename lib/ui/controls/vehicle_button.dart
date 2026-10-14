@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
-import '../../core/game_mode.dart';
 import '../../engine/game.dart';
 
 /// Показывает [VehicleButton], только когда есть смысл его нажимать: игрок
-/// уже за рулём (тогда это "выйти"), либо в радиусе посадки от машины
-/// (тогда "сесть"). Проверяет дистанцию каждый кадр через Ticker — не через
+/// уже за рулём (тогда это "выйти"), либо в радиусе посадки от своей машины
+/// ("сесть") или от медленной машины потока ("угнать" — кнопка красная).
+/// Что именно — решает [Game.vehicleInteraction]. Проверяет дистанцию каждый кадр через Ticker — не через
 /// перестройку всего GameHud, чтобы не дёргать весь Stack ради одной кнопки.
 class VehicleInteractButton extends StatefulWidget {
   const VehicleInteractButton({super.key, required this.game, required this.onToggle});
@@ -24,7 +24,7 @@ class VehicleInteractButton extends StatefulWidget {
 class _VehicleInteractButtonState extends State<VehicleInteractButton>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
-  bool _visible = false;
+  VehicleInteraction? _interaction;
 
   @override
   void initState() {
@@ -33,14 +33,8 @@ class _VehicleInteractButtonState extends State<VehicleInteractButton>
   }
 
   void _check() {
-    final visible = gameModeState.mode == ControlMode.driving || _isPlayerNear();
-    if (visible != _visible) setState(() => _visible = visible);
-  }
-
-  bool _isPlayerNear() {
-    final playerPos = widget.game.playerNode.globalTransform.getTranslation();
-    final vehiclePos = widget.game.vehicle.node.globalTransform.getTranslation();
-    return (playerPos - vehiclePos).length <= Game.vehicleInteractRadius;
+    final interaction = widget.game.vehicleInteraction;
+    if (interaction != _interaction) setState(() => _interaction = interaction);
   }
 
   @override
@@ -51,8 +45,9 @@ class _VehicleInteractButtonState extends State<VehicleInteractButton>
 
   @override
   Widget build(BuildContext context) {
-    if (!_visible) return const SizedBox.shrink();
-    return VehicleButton(onPressed: widget.onToggle);
+    final interaction = _interaction;
+    if (interaction == null) return const SizedBox.shrink();
+    return VehicleButton(onPressed: widget.onToggle, isCarjack: interaction == VehicleInteraction.carjack);
   }
 }
 
@@ -60,9 +55,13 @@ class _VehicleInteractButtonState extends State<VehicleInteractButton>
 /// переданный колбэк (Game.toggleVehicle). Видимость — забота
 /// [VehicleInteractButton].
 class VehicleButton extends StatelessWidget {
-  const VehicleButton({super.key, required this.onPressed});
+  const VehicleButton({super.key, required this.onPressed, this.isCarjack = false});
 
   final VoidCallback onPressed;
+
+  /// Угон, а не посадка в свою — красная, чтобы было видно, что это
+  /// преступление (розыск).
+  final bool isCarjack;
 
   @override
   Widget build(BuildContext context) {
@@ -73,10 +72,10 @@ class VehicleButton extends StatelessWidget {
         height: 64,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.white.withValues(alpha: 0.12),
-          border: Border.all(color: Colors.white24, width: 2),
+          color: isCarjack ? Colors.red.withValues(alpha: 0.35) : Colors.white.withValues(alpha: 0.12),
+          border: Border.all(color: isCarjack ? Colors.redAccent : Colors.white24, width: 2),
         ),
-        child: const Icon(Icons.directions_car, color: Colors.white70),
+        child: Icon(isCarjack ? Icons.car_crash : Icons.directions_car, color: Colors.white70),
       ),
     );
   }

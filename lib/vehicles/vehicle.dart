@@ -172,7 +172,7 @@ Future<BuiltVehicle> buildPlaceholderSedan() =>
 /// id нет в assets/data/vehicles.json (сейчас там есть только car_sedan_01
 /// — у хэтчбека/пикапа своих записей ещё нет, они пока decorative-only и
 /// вообще не проезжают через VehicleControllerComponent).
-const _fallbackSpec = VehicleSpec(
+const fallbackVehicleSpec = VehicleSpec(
   maxSpeedKmh: 200.0, // было 165 — см. PROGRESS.md
   acceleration: 16.0, // было 8.2 — разгон ощущался вялым
   braking: 32.0, // было 10.5 — торможение тянулось неприлично долго
@@ -182,7 +182,7 @@ const _fallbackSpec = VehicleSpec(
 /// повреждений (см. [BuiltVehicle]). Для декоративных припаркованных машин
 /// без физики/повреждений см. [buildStaticVehicleVisual]. Числа
 /// разгона/торможения/скорости — из assets/data/vehicles.json по
-/// [vehicleId], либо [_fallbackSpec], если записи нет. [attachPlayerInput]
+/// [vehicleId], либо [fallbackVehicleSpec], если записи нет. [attachPlayerInput]
 /// выключается для AI-машин (см. [buildVehicleWithSpec]) — иначе они бы
 /// получали тот же джойстик, что и машина игрока.
 Future<BuiltVehicle> buildVehicle(
@@ -190,7 +190,7 @@ Future<BuiltVehicle> buildVehicle(
   String? vehicleId,
   bool attachPlayerInput = true,
 }) async {
-  final spec = (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ?? _fallbackSpec;
+  final spec = (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ?? fallbackVehicleSpec;
   return buildVehicleWithSpec(dims, spec, attachPlayerInput: attachPlayerInput);
 }
 

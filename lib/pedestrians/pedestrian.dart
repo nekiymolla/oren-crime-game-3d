@@ -45,6 +45,10 @@ class Pedestrian {
 
   bool get isKnockedDown => knockedDownSeconds > 0.0;
 
+  /// Сколько ещё секунд бежит в панике (водитель угнанной машины) —
+  /// скорость в [panicSpeedMultiplier] раз выше шага.
+  double panicSeconds = 0.0;
+
   /// Удар машиной: отлетает от [impactFrom] (центр машины) со скоростью,
   /// растущей со скоростью машины [impactSpeed], и лежит [lieSeconds].
   void knockDown(
@@ -61,6 +65,9 @@ class Pedestrian {
     yaw = math.atan2(away.x, away.z);
   }
 }
+
+/// Во сколько раз быстрее шага бежит перепуганный пешеход (1.3 -> ~4.5 м/с).
+const double panicSpeedMultiplier = 3.5;
 
 /// Трение скольжения сбитого пешехода по земле, 1/с: при отлёте 6 м/с
 /// он проезжает около метра (6 / 6).
@@ -116,6 +123,11 @@ bool advancePedestrian(
     pedestrian.position += pedestrian.knockbackVelocity * dt;
     pedestrian.knockbackVelocity.scale(math.exp(-_knockbackFriction * dt));
     return false;
+  }
+
+  if (pedestrian.panicSeconds > 0.0) {
+    pedestrian.panicSeconds = math.max(0.0, pedestrian.panicSeconds - dt);
+    speed *= panicSpeedMultiplier;
   }
 
   // Встал после удара — сначала обратно на ребро (см. Pedestrian.returnPoint).

@@ -22,6 +22,7 @@ RoadGraph _lineGraph() {
 
 void main() {
   knockdownTests();
+  panicTests();
 
   test('buildPedestrianAdjacency строит связи в обе стороны', () {
     final adjacency = buildPedestrianAdjacency(_lineGraph());
@@ -136,5 +137,19 @@ void knockdownTests() {
     pedestrian.position = vm.Vector3(5, 0, 2);
     pedestrian.knockDown(vm.Vector3(5, 0, 1), 15.0);
     expect(pedestrian.returnPoint!.z, closeTo(0, 1e-6));
+  });
+}
+
+void panicTests() {
+  test('перепуганный водитель бежит быстрее шага, потом успокаивается', () {
+    final graph = _lineGraph();
+    final pedestrian = Pedestrian(position: vm.Vector3(0, 0, 0), currentNodeId: 'a', targetNodeId: 'b')
+      ..panicSeconds = 1.0;
+    _advance(pedestrian, graph, 1.0);
+    expect(pedestrian.position.x, closeTo(1.3 * panicSpeedMultiplier, 0.05));
+    expect(pedestrian.panicSeconds, 0.0);
+    final before = pedestrian.position.x;
+    _advance(pedestrian, graph, 1.0);
+    expect(pedestrian.position.x - before, closeTo(1.3, 0.05));
   });
 }

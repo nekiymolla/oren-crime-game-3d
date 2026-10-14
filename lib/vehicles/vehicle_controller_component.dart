@@ -83,22 +83,22 @@ class VehicleControllerComponent extends Component {
   /// направлением носа — расхождение и есть занос).
   vm.Vector2 velocityXZ = vm.Vector2.zero();
 
-  double _yaw = 0.0;
+  /// Курс носа машины (рад, 0 = +Z), та же конвенция yaw, что и у
+  /// FollowCameraController — используется для авто-довода камеры за
+  /// машиной, когда игрок не крутит вид сам (см. Game.tick). Пишется и
+  /// снаружи — для машины, собранной на месте угнанной (см. Game._carjack):
+  /// иначе она развернулась бы носом на +Z.
+  double heading = 0.0;
   double _throttleInput = 0.0;
   double _steerInput = 0.0;
 
   double get speed => velocityXZ.length;
 
-  /// Курс носа машины (рад), та же конвенция yaw, что и у FollowCameraController
-  /// — используется для авто-довода камеры за машиной, когда игрок не крутит
-  /// вид сам (см. Game.tick).
-  double get heading => _yaw;
-
   /// Насколько текущее движение "не туда, куда смотрит машина" — 0 = едет
   /// строго носом вперёд, ближе к 1 = боком (для UI/звука заноса позже).
   double get driftFactor {
     if (speed < 0.5) return 0.0;
-    final forward = vm.Vector2(math.sin(_yaw), math.cos(_yaw));
+    final forward = vm.Vector2(math.sin(heading), math.cos(heading));
     final align = (velocityXZ.normalized()).dot(forward).clamp(-1.0, 1.0);
     return (1.0 - align).clamp(0.0, 1.0);
   }
@@ -134,7 +134,7 @@ class VehicleControllerComponent extends Component {
     final dt = fixedDt;
     if (dt <= 0.0 || !isAttached) return;
 
-    final forward = vm.Vector2(math.sin(_yaw), math.cos(_yaw));
+    final forward = vm.Vector2(math.sin(heading), math.cos(heading));
     var forwardSpeed = velocityXZ.dot(forward);
 
     // 1. Продольная динамика вдоль носа машины.
@@ -162,13 +162,13 @@ class VehicleControllerComponent extends Component {
     // 2. Руление — велосипедная модель; радиус разворота зависит от скорости.
     if (forwardSpeed.abs() > 0.05) {
       final turnRate = (forwardSpeed / wheelBase) * math.tan(_steerInput * maxSteerAngle);
-      _yaw += turnRate * dt;
+      heading += turnRate * dt;
     }
 
     // 3. Занос: на низкой скорости сцепление почти полное (вектор скорости
     // мгновенно доворачивается за носом), на высокой — падает, и вектор
     // скорости "отстаёт" от разворота носа, машину сносит боком.
-    final newForward = vm.Vector2(math.sin(_yaw), math.cos(_yaw));
+    final newForward = vm.Vector2(math.sin(heading), math.cos(heading));
     final targetVelocity = newForward * forwardSpeed;
     final speedFactor = (speed / driftThresholdSpeed).clamp(0.0, 1.0);
     final grip = gripAtLowSpeed + (gripAtHighSpeed - gripAtLowSpeed) * speedFactor;
@@ -216,7 +216,7 @@ class VehicleControllerComponent extends Component {
     final newPos = currentPos + moveDelta;
     final groundY = groundPlaneHeight ?? newPos.y;
     final worldPos = vm.Vector3(newPos.x, groundY, newPos.z);
-    final worldRot = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), _yaw);
+    final worldRot = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), heading);
     final worldMat = vm.Matrix4.compose(worldPos, worldRot, node.scale);
 
     final parent = node.parent;
