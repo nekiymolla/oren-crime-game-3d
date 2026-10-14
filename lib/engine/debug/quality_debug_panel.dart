@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../game.dart';
@@ -28,6 +30,25 @@ class QualityDebugPanel extends StatefulWidget {
 }
 
 class _QualityDebugPanelState extends State<QualityDebugPanel> {
+  /// Погода и время меняются сами — подписи кнопок обновляем раз в
+  /// секунду, иначе кнопка показывала "ясно", когда в HUD уже
+  /// "малооблачно".
+  Timer? _refresh;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _refresh?.cancel();
+    super.dispose();
+  }
+
   static const List<double> _scaleSteps = [1.0, 0.75, 0.5];
 
   void _cyclePreset() {

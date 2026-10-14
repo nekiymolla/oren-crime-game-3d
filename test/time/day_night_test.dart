@@ -54,7 +54,7 @@ void main() {
     final night = evaluateSky(1.0, october14);
     expect(night.nightFactor, closeTo(1.0, 1e-9));
     expect(night.lightIntensity, lessThanOrEqualTo(0.5)); // луна, не солнце
-    expect(night.lightDirection.y, greaterThan(0.5)); // луна высоко
+    expect(night.lightDirection.y, greaterThan(0.0)); // свет сверху, не из-под земли
     expect(night.environmentIntensity, lessThan(0.2));
 
     // Unlit-земля днём не меняется, ночью темнеет и холодеет.
@@ -85,5 +85,38 @@ void main() {
     expect(clock.hours, closeTo(0.1, 1e-9));
     expect(clock.dayOfYear, 1);
     expect(clock.label, '00:06');
+  });
+
+  test('луна: фазы по месяцу, полнолуние — напротив солнца', () {
+    // Новолуние игрового календаря — день 277, полнолуние — через полмесяца.
+    expect(moonIllumination(0, 277), closeTo(0.0, 0.01));
+    final fullDay = 277 + (synodicMonthDays / 2).floor();
+    expect(moonIllumination(12, fullDay), greaterThan(0.95));
+    final sun = sunDirection(13.3, fullDay);
+    final moon = moonDirection(13.3, fullDay);
+    expect(sun.dot(moon), lessThan(-0.8)); // почти напротив
+  });
+
+  test('на старте игры луна растущая и вечером высоко', () {
+    final illumination = moonIllumination(21, october14);
+    expect(illumination, greaterThan(0.5));
+    expect(illumination, lessThan(0.95));
+    expect(moonDirection(21, october14).y, greaterThan(0.3));
+  });
+
+  test('луна восходит каждый день позже примерно на 50 минут', () {
+    double rise(int day) {
+      for (var h = 0.0; h < 24; h += 1 / 60) {
+        if (moonDirection(h, day).y <= 0 && moonDirection(h + 1 / 60, day).y > 0) return h;
+      }
+      return double.nan;
+    }
+    final delay = (rise(290) - rise(289)) * 60;
+    expect(delay, closeTo(49, 8));
+  });
+
+  test('звёзды — только ночью', () {
+    expect(evaluateSky(13.0, october14).starIntensity, 0.0);
+    expect(evaluateSky(1.0, october14).starIntensity, greaterThan(0.9));
   });
 }

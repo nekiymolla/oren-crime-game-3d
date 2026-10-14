@@ -187,6 +187,7 @@ class Game {
     scene.add(ground);
     scene.add(_buildSun());
     _buildSky();
+    final shaderSky = await _loadShaderSky();
     dayNight = DayNightView(
       scene: scene,
       clock: clock,
@@ -204,6 +205,7 @@ class Game {
       maxParticles: quality.precipitationParticles,
     );
     scene.add(_weatherView.buildNode());
+    dayNight.visibleSky = shaderSky;
     // Сразу выставить небо/свет на стартовое время — иначе первый кадр был
     // бы дневным статичным.
     dayNight.update(0, weather: weather.params);
@@ -327,7 +329,16 @@ class Game {
     );
     _cameraComponent = cameraComponent;
     cameraNode = Node()..addComponent(cameraComponent);
-    cameraController = FollowCameraController(followTarget: playerNode, distance: 6.0, lookHeight: 1.5);
+    // minPitch по умолчанию -0.15: вверх не посмотреть дальше ~9° над
+    // горизонтом — ни луну, ни высокое солнце не увидеть. Разрешаем до
+    // ~57°, а камеру при взгляде вверх подтягиваем к персонажу, чтобы не
+    // уходила под землю (см. _keepCameraAboveGround).
+    cameraController = FollowCameraController(
+      followTarget: playerNode,
+      distance: _cameraDistance,
+      lookHeight: 1.5,
+      minPitch: -1.0,
+    );
     cameraNode.addComponent(cameraController);
     scene.add(cameraNode);
 
@@ -511,6 +522,26 @@ class Game {
     return sunNode;
   }
 
+  /// Видимое небо — шейдер assets/shaders/crime_sky.fmat: чёткий диск
+  /// солнца, луна с фазами, звёзды. Освещение сцены по-прежнему
+  /// запекается с градиентного неба ([_buildSky]): иначе HDR-диск солнца
+  /// попал бы в отражения и светил в машинах даже ночью. Не загрузилось
+  /// (старая сборка без шейдера) — остаётся градиентное.
+  Future<PreprocessedSky?> _loadShaderSky() async {
+    try {
+      final sky = await loadFmatSky('assets/shaders/crime_sky.fmat');
+      final skybox = Skybox(sky);
+      scene.skybox = skybox;
+      _skybox = skybox;
+      _applyEnvironmentSettings();
+      return sky;
+    } catch (error) {
+      // ignore: avoid_print
+      print('Небо-шейдер не загрузилось, остаётся градиентное: $error');
+      return null;
+    }
+  }
+
   /// Градиентное небо — на нём же строится ambient-освещение сцены. Цвета
   /// и солнце в нём каждый кадр выставляет суточный цикл (DayNightView);
   /// освещение от неба запекается один раз, дальше меняется только его
@@ -661,6 +692,7 @@ class Game {
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
     }
+    _keepCameraAboveGround();
   }
 
   /// Погода и суточный цикл — в одном месте, порядок важен: молния ->
@@ -712,6 +744,23 @@ class Game {
     if (gameModeState.mode == ControlMode.driving) toggleVehicle();
     playerNode.position = worldConfig.playerSpawnPosition;
     cameraController.followTarget = playerNode;
+  }
+
+  /// Дистанция камеры за игроком в обычном положении.
+  static const double _cameraDistance = 6.0;
+
+  /// Камера ниже точки взгляда (pitch < 0 — смотрим вверх) ушла бы под
+  /// землю: подтягиваем её к персонажу так, чтобы она оставалась хотя бы на
+  /// 0.3 м над землёй. Как в GTA — посмотреть на небо значит "присесть"
+  /// камерой к плечу.
+  void _keepCameraAboveGround() {
+    final pitch = cameraController.pitch;
+    if (pitch >= 0) {
+      cameraController.distance = _cameraDistance;
+      return;
+    }
+    const clearance = 1.5 - 0.3; // lookHeight минус запас над землёй
+    cameraController.distance = math.min(_cameraDistance, clearance / math.sin(-pitch));
   }
 
   /// Плавно доворачивает орбиту камеры к [targetYaw] по кратчайшей дуге —

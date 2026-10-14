@@ -108,16 +108,18 @@ class WeatherView {
       ..color.setFrom(sky.horizonColor + (warm - sky.horizonColor) * weather.fogWarmth)
       ..density = weather.fogDensity
       ..maxOpacity = 1.0
-      ..sunInScatter = sunUp ? (0.25 + 0.6 * golden) * (1.0 - cloud) : 0.0
-      ..sunInScatterExponent = 6.0;
+      // Узкий ореол, а не полэкрана: с экспонентой 6 и силой до 0.85 дымка
+      // засвечивала всё в сторону солнца (жалоба на "туман от солнца").
+      ..sunInScatter = sunUp ? (0.06 + 0.2 * golden) * (1.0 - cloud) : 0.0
+      ..sunInScatterExponent = 24.0;
 
     // Лучи солнца: сильнее у низкого солнца, нет при сплошной облачности
     // и ночью. Нужен солнечный свет с тенями — его даёт DayNightView.
     final rays = weather.sunRays * (1.0 - cloud) * (sunUp ? 1.0 : 0.0);
     scene.godRays
       ..enabled = godRaysAllowed() && rays > 0.05 && sky.castsShadow
-      ..intensity = rays * (0.45 + 0.9 * golden)
-      ..density = 0.55
+      ..intensity = rays * (0.25 + 0.5 * golden)
+      ..density = 0.35
       ..anisotropy = 0.75
       ..color.setFrom(sky.lightColor);
 
@@ -125,8 +127,10 @@ class WeatherView {
     final flare = (1.0 - cloud) * weather.sunRays * (sunUp ? 1.0 : 0.0);
     scene.postProcess.bloom.lensFlare
       ..enabled = bloomAllowed() && flare > 0.2
-      ..intensity = 0.35 * flare
-      ..haloIntensity = 0.25 * flare
+      // Только призраки-отражения, без ореола: ореол заливает кадр (так
+      // предупреждает и справочник движка) — он и давал белую пелену.
+      ..intensity = 0.15 * flare
+      ..haloIntensity = 0.0
       ..ghostCount = 4;
 
     // Грейдинг: погода + "неон" — на закате и ночью сдвиг в мадженту и

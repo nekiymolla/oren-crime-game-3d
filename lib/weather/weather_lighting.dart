@@ -37,6 +37,11 @@ SkyLighting applyWeather(SkyLighting sky, WeatherParams weather, {double lightni
     horizonColor: horizon + flashColor,
     sunDiskColor: sunDisk,
     unlitTint: unlit + vm.Vector3.all(0.5 * flash),
+    // Сквозь облака не видно ни звёзд, ни луны, а корона солнца гаснет
+    // вместе с диском.
+    starIntensity: sky.starIntensity * (1 - cloud) * (1 - cloud),
+    sunGlowColor: sky.sunGlowColor * ((1 - cloud) * (1 - cloud)),
+    moonVisibility: 1.0 - 0.95 * cloud,
   );
 }
 

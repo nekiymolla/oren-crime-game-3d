@@ -23,6 +23,11 @@ class DayNightView {
     this.unlitSurfaces = const [],
   });
 
+  /// Видимое небо — шейдер crime_sky.fmat (солнце, луна, звёзды). null —
+  /// не загрузилось, тогда фоном остаётся [sky].
+  PreprocessedSky? visibleSky;
+  double _skyTime = 0.0;
+
   final Scene scene;
   final GameClock clock;
   final Node sunNode;
@@ -94,6 +99,22 @@ class DayNightView {
       ..sunDirection = sunDirection(clock.hours, clock.dayOfYear)
       ..sunColor = lighting.sunDiskColor;
     scene.environmentIntensity = lighting.environmentIntensity;
+
+    final shaderSky = visibleSky;
+    if (shaderSky != null) {
+      _skyTime += deltaSeconds;
+      shaderSky.parameters
+        ..setVec3('zenith_color', lighting.zenithColor)
+        ..setVec3('horizon_color', lighting.horizonColor)
+        ..setVec3('ground_color', lighting.groundColor)
+        ..setVec3('sun_direction', lighting.sunDirectionToSun)
+        ..setVec3('sun_color', lighting.sunDiskColor)
+        ..setVec3('sun_glow', lighting.sunGlowColor)
+        ..setVec3('moon_direction', lighting.moonDirectionToMoon)
+        ..setFloat('moon_brightness', lighting.moonIllumination > 0.0 ? 1.0 - 0.95 * (weather?.cloudCover ?? 0.0) : 0.0)
+        ..setFloat('star_intensity', lighting.starIntensity)
+        ..setFloat('time_seconds', _skyTime);
+    }
     final tint = lighting.unlitTint;
     for (var i = 0; i < unlitSurfaces.length; i++) {
       // Снег ложится на подложку-газон: цвет уходит к белому.

@@ -73,6 +73,35 @@ vm.Vector3 sunDirection(double hours, int dayOfYear) {
   return vm.Vector3(east, up, -north)..normalize();
 }
 
+/// Синодический месяц — от новолуния до новолуния, дни.
+const double synodicMonthDays = 29.53;
+
+/// День года, на который приходится "новолуние" игрового календаря. Не
+/// астрономическая дата: выбран так, чтобы к старту игры (14 октября) луна
+/// была растущей, ~10 дней, и вечером стояла высоко — её видно сразу.
+const double _newMoonDayOfYear = 277.0;
+
+/// Возраст луны в днях от новолуния (0..29.53).
+double moonAgeDays(double hours, int dayOfYear) {
+  final days = dayOfYear + hours / 24.0 - _newMoonDayOfYear;
+  return (days % synodicMonthDays + synodicMonthDays) % synodicMonthDays;
+}
+
+/// Освещённая доля диска луны: 0 — новолуние, 1 — полнолуние.
+double moonIllumination(double hours, int dayOfYear) {
+  final phase = 2 * math.pi * moonAgeDays(hours, dayOfYear) / synodicMonthDays;
+  return (1 - math.cos(phase)) / 2;
+}
+
+/// Направление НА луну. Упрощение: луна идёт по пути солнца, но отстаёт
+/// на долю суток, равную её возрасту в месяцах (в полнолуние — на 12
+/// часов: напротив солнца). Отсюда и восход на ~50 минут позже каждый день.
+/// Наклон орбиты луны не учитываем — для игры незаметно.
+vm.Vector3 moonDirection(double hours, int dayOfYear) {
+  final lagHours = moonAgeDays(hours, dayOfYear) / synodicMonthDays * 24.0;
+  return sunDirection(hours - lagHours, dayOfYear);
+}
+
 /// Свет и небо на данный момент — всё, что нужно сцене.
 class SkyLighting {
   SkyLighting({
@@ -88,6 +117,11 @@ class SkyLighting {
     required this.nightFactor,
     required this.sunElevation,
     required this.unlitTint,
+    required this.sunDirectionToSun,
+    required this.moonDirectionToMoon,
+    required this.moonIllumination,
+    required this.starIntensity,
+    required this.sunGlowColor,
   });
 
   /// Направление НА источник (солнце днём, луна ночью).
@@ -115,6 +149,14 @@ class SkyLighting {
   /// под чёрным небом. Днём (1, 1, 1) — дневной вид не меняется.
   final vm.Vector3 unlitTint;
 
+  /// Для шейдера неба (crime_sky.fmat): где солнце и луна, фаза луны,
+  /// яркость звёзд и узкой короны солнца.
+  final vm.Vector3 sunDirectionToSun;
+  final vm.Vector3 moonDirectionToMoon;
+  final double moonIllumination;
+  final double starIntensity;
+  final vm.Vector3 sunGlowColor;
+
   /// Насколько сейчас "золотой час" (закат/рассвет/сумерки): 1 — солнце у
   /// горизонта, 0 — высоко или глубокая ночь. По нему — неоновый
   /// грейдинг в духе Вайс-Сити и свечение дымки к солнцу.
@@ -128,6 +170,9 @@ class SkyLighting {
     vm.Vector3? horizonColor,
     vm.Vector3? sunDiskColor,
     vm.Vector3? unlitTint,
+    double? starIntensity,
+    vm.Vector3? sunGlowColor,
+    double? moonVisibility,
   }) => SkyLighting(
     lightDirection: lightDirection,
     lightColor: lightColor,
@@ -141,6 +186,11 @@ class SkyLighting {
     nightFactor: nightFactor,
     sunElevation: sunElevation,
     unlitTint: unlitTint ?? this.unlitTint,
+    sunDirectionToSun: sunDirectionToSun,
+    moonDirectionToMoon: moonDirectionToMoon,
+    moonIllumination: moonIllumination * (moonVisibility ?? 1.0),
+    starIntensity: starIntensity ?? this.starIntensity,
+    sunGlowColor: sunGlowColor ?? this.sunGlowColor,
   );
 }
 
@@ -157,9 +207,9 @@ final vm.Vector3 _nightZenith = vm.Vector3(0.016, 0.01, 0.045);
 final vm.Vector3 _nightHorizon = vm.Vector3(0.06, 0.035, 0.1);
 final vm.Vector3 _nightGround = vm.Vector3(0.02, 0.02, 0.025);
 
-/// Луна — без своей орбиты: висит высоко на юго-востоке и даёт ночью
-/// слабый холодный свет, чтобы город не проваливался в чёрное.
-final vm.Vector3 _moonDirection = vm.Vector3(0.35, 0.8, 0.45)..normalize();
+/// Ночью без луны (не взошла / новолуние) свет идёт "от неба" — почти
+/// сверху и очень слабый, без теней: город не проваливается в чёрное.
+final vm.Vector3 _skyglowDirection = vm.Vector3(0.15, 1.0, 0.1)..normalize();
 final vm.Vector3 _moonColor = vm.Vector3(0.55, 0.65, 1.0);
 
 /// Дневная сила солнца — как было до суточного цикла.
@@ -180,12 +230,19 @@ SkyLighting evaluateSky(double hours, int dayOfYear) {
 
   final sunColor = _mix(vm.Vector3(1.0, 0.55, 0.25), vm.Vector3(1.0, 0.96, 0.88), dayT);
 
-  // Над горизонтом светит солнце; ниже — луна (в сумерках обе почти
-  // гаснут, так что смена направления незаметна).
+  // Над горизонтом светит солнце; ниже — луна, если она взошла, со
+  // светом по фазе (в полнолуние ярко, в серп — едва), иначе слабое
+  // свечение неба. В сумерках всё почти гаснет — смена незаметна.
+  final moon = moonDirection(hours, dayOfYear);
+  final illumination = moonIllumination(hours, dayOfYear);
+  final moonUp = _smoothstep(0.0, 0.12, moon.y);
   final isSunUp = elevation > -0.02;
-  final lightDirection = isSunUp ? sun : _moonDirection.clone();
+  final useMoon = !isSunUp && moonUp > 0.0;
+  final lightDirection = isSunUp ? sun : (useMoon ? moon.clone() : _skyglowDirection.clone());
   final lightColor = isSunUp ? sunColor : _moonColor.clone();
-  final lightIntensity = isSunUp ? _daySunIntensity * dayT : _moonIntensity * nightFactor;
+  final lightIntensity = isSunUp
+      ? _daySunIntensity * dayT
+      : _moonIntensity * nightFactor * (useMoon ? (0.3 + 0.7 * illumination) * moonUp : 0.25);
 
   final environmentIntensity = _nightEnvironment + (1.0 - _nightEnvironment) * (1.0 - nightFactor);
 
@@ -200,6 +257,12 @@ SkyLighting evaluateSky(double hours, int dayOfYear) {
   final brightness = (0.5 * environmentIntensity + 0.5 * lightIntensity / _daySunIntensity).clamp(0.0, 1.0);
   final unlitTint = _mix(vm.Vector3(1, 1, 1), vm.Vector3(0.7, 0.8, 1.0), nightFactor) * brightness;
 
+  // Солнце для шейдера неба: чёткий HDR-диск (краснее и тусклее у
+  // горизонта) и узкая корона; ниже горизонта — гаснет.
+  final sunVisible = _smoothstep(-0.03, 0.01, elevation);
+  final sunDisk = sunColor * (_sunDiskRadiance * (0.25 + 0.75 * dayT) * sunVisible);
+  final sunGlow = sunColor * (_sunGlowStrength * sunVisible);
+
   return SkyLighting(
     lightDirection: lightDirection,
     lightColor: lightColor,
@@ -209,13 +272,23 @@ SkyLighting evaluateSky(double hours, int dayOfYear) {
     zenithColor: zenith,
     horizonColor: horizon,
     groundColor: ground,
-    // HDR-диск солнца в небе; ночью гаснет вместе с ним.
-    sunDiskColor: sunColor * (3.0 * dayT),
+    sunDiskColor: sunDisk,
     nightFactor: nightFactor,
     sunElevation: elevation,
     unlitTint: unlitTint,
+    sunDirectionToSun: sun,
+    moonDirectionToMoon: moon,
+    moonIllumination: illumination,
+    // Звёзды проступают в глубоких сумерках.
+    starIntensity: nightFactor * nightFactor,
+    sunGlowColor: sunGlow,
   );
 }
+
+/// Яркость диска солнца в шейдере неба (линейный HDR): с запасом выше
+/// порога bloom — диск выгорает в белое и светится, как настоящий.
+const double _sunDiskRadiance = 40.0;
+const double _sunGlowStrength = 1.2;
 
 double _smoothstep(double edge0, double edge1, double x) {
   final t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);

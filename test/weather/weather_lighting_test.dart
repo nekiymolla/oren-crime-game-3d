@@ -17,7 +17,7 @@ void main() {
     final overcast = applyWeather(day, weatherPresets[WeatherKind.overcast]!);
     expect(overcast.lightIntensity, lessThan(day.lightIntensity * 0.35));
     expect(overcast.castsShadow, isFalse);
-    expect(overcast.sunDiskColor.x, lessThan(0.01));
+    expect(overcast.sunDiskColor.x, lessThan(day.sunDiskColor.x * 0.01)); // от диска <1%
     // Синева зенита уходит: разница синего и красного каналов меньше.
     final dayBlue = day.zenithColor.b - day.zenithColor.r;
     final overcastBlue = overcast.zenithColor.b - overcast.zenithColor.r;

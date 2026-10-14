@@ -1,0 +1,135 @@
+// Небо Crime Oren: градиент (цвета задаёт суточный цикл + погода, см.
+// lib/time/day_night.dart), реалистичные солнце и луна, звёзды.
+//
+// Почему своё, а не GradientSkySource: у того солнце — размытое пятно
+// pow(cos, k) без края, и чтобы оно читалось, его приходилось раздувать —
+// вместе с bloom и свечением тумана выходила засветка на пол-экрана. Здесь
+// солнце — чёткий диск с потемнением к краю и узкой короной, остальное
+// свечение даёт bloom. Небо рисуется в последнюю очередь фоном и туманом не
+// закрывается, поэтому солнце и луна не тонут в дымке.
+material {
+  name: "CrimeSky",
+  parameters: [
+    { type: vec3, name: zenith_color, default: [0.2, 0.4, 0.68] },
+    { type: vec3, name: horizon_color, default: [0.72, 0.8, 0.85] },
+    { type: vec3, name: ground_color, default: [0.3, 0.3, 0.27] },
+    { type: vec3, name: sun_direction, default: [0.0, 0.5, 0.8] },
+    // Яркость диска (линейный HDR) и узкой короны вокруг него.
+    { type: vec3, name: sun_color, default: [40.0, 37.0, 33.0] },
+    { type: vec3, name: sun_glow, default: [1.2, 1.0, 0.8] },
+    { type: float, name: sun_angular_radius, default: 0.0125 },
+    { type: vec3, name: moon_direction, default: [0.0, 0.6, -0.8] },
+    // Яркость освещённой части луны (0 — луны не видно: облака, день).
+    { type: float, name: moon_brightness, default: 1.0 },
+    { type: float, name: moon_angular_radius, default: 0.0115 },
+    // Звёзды: 0 днём/в облачность, 1 ясной ночью.
+    { type: float, name: star_intensity, default: 0.0 },
+    { type: float, name: time_seconds, default: 0.0 },
+  ],
+}
+
+sky {
+  float Hash13(vec3 p) {
+    p = fract(p * 0.1031);
+    p += dot(p, p.zyx + 31.32);
+    return fract((p.x + p.y) * p.z);
+  }
+
+  float Hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+
+  float ValueNoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    float a = Hash12(i);
+    float b = Hash12(i + vec2(1.0, 0.0));
+    float c = Hash12(i + vec2(0.0, 1.0));
+    float d = Hash12(i + vec2(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+  }
+
+  // Ортонормированный базис диска небесного тела, смотрящего на зрителя.
+  void DiskBasis(vec3 axis, out vec3 right, out vec3 up) {
+    vec3 helper = abs(axis.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    right = normalize(cross(helper, axis));
+    up = cross(axis, right);
+  }
+
+  vec3 Sky(vec3 direction) {
+    float h = direction.y;
+
+    // Градиент: у горизонта цвет держится дольше, к зениту — быстро.
+    vec3 color = mix(material_params.horizon_color, material_params.zenith_color,
+                     pow(clamp(h, 0.0, 1.0), 0.45));
+    if (h < 0.0) {
+      color = mix(material_params.horizon_color, material_params.ground_color,
+                  clamp(-h * 4.0, 0.0, 1.0));
+    }
+
+    // --- Звёзды: случайные точки на сетке направлений, мерцают.
+    float stars = material_params.star_intensity;
+    if (stars > 0.001 && h > 0.0) {
+      vec3 cell = floor(direction * 220.0);
+      float rnd = Hash13(cell);
+      if (rnd > 0.9965) {
+        vec3 center = (cell + 0.5) / 220.0;
+        float dist = length(direction - normalize(center)) * 220.0;
+        float point = clamp(1.0 - dist * 1.6, 0.0, 1.0);
+        float twinkle = 0.7 + 0.3 * sin(material_params.time_seconds * (2.0 + rnd * 7.0) + rnd * 100.0);
+        float bright = (rnd - 0.9965) / 0.0035;
+        // Ближе к горизонту звёзды тонут в дымке.
+        float horizonFade = clamp(h * 6.0, 0.0, 1.0);
+        vec3 tint = mix(vec3(0.75, 0.85, 1.0), vec3(1.0, 0.9, 0.75), Hash13(cell + 7.0));
+        color += tint * point * point * twinkle * (0.4 + 2.0 * bright * bright) * stars * horizonFade;
+      }
+    }
+
+    // --- Луна: сфера, освещённая солнцем, — фазы получаются сами.
+    vec3 moonAxis = normalize(material_params.moon_direction);
+    float moonR = material_params.moon_angular_radius;
+    float moonCos = dot(direction, moonAxis);
+    if (material_params.moon_brightness > 0.001 && moonCos > cos(moonR * 4.0)) {
+      vec3 right;
+      vec3 up;
+      DiskBasis(moonAxis, right, up);
+      vec2 p = vec2(dot(direction, right), dot(direction, up)) / moonR;
+      float r2 = dot(p, p);
+      if (r2 < 1.0) {
+        // Нормаль сферы в этой точке диска (к зрителю — против moonAxis).
+        vec3 n = normalize(p.x * right + p.y * up - sqrt(1.0 - r2) * moonAxis);
+        float lit = max(dot(n, normalize(material_params.sun_direction)), 0.0);
+        // "Моря" и кратеры — тёмные пятна шума, плюс пепельный свет Земли.
+        float maria = ValueNoise(p * 2.3 + 3.0) * 0.6 + ValueNoise(p * 6.0 + 11.0) * 0.4;
+        float albedo = mix(0.55, 1.0, smoothstep(0.35, 0.65, maria));
+        float edge = smoothstep(1.0, 0.94, r2);
+        vec3 moon = vec3(1.0, 0.97, 0.9) * albedo * (lit * 2.4 + 0.035);
+        color = mix(color, color * 0.2 + moon * material_params.moon_brightness, edge);
+      }
+      // Мягкий ореол вокруг луны.
+      float halo = exp(-max(acos(clamp(moonCos, -1.0, 1.0)) - moonR, 0.0) / (moonR * 1.2));
+      color += vec3(0.6, 0.65, 0.8) * halo * 0.12 * material_params.moon_brightness;
+    }
+
+    // --- Солнце: чёткий диск с потемнением к краю и узкая корона.
+    vec3 sunAxis = normalize(material_params.sun_direction);
+    float sunCos = clamp(dot(direction, sunAxis), -1.0, 1.0);
+    float sunAngle = acos(sunCos);
+    float sunR = material_params.sun_angular_radius;
+    if (sunAngle < sunR) {
+      float x = sunAngle / sunR;
+      // Потемнение к краю: края диска заметно краснее и тусклее центра.
+      float mu = sqrt(max(1.0 - x * x, 0.0));
+      vec3 limb = vec3(0.4 + 0.6 * mu, 0.3 + 0.7 * mu, 0.2 + 0.8 * mu);
+      float edge = smoothstep(1.0, 0.9, x);
+      color = mix(color, material_params.sun_color * limb, edge);
+    }
+    float outside = max(sunAngle - sunR, 0.0);
+    color += material_params.sun_glow * (exp(-outside / (sunR * 0.9)) * 0.9 + exp(-outside / (sunR * 6.0)) * 0.12);
+
+    return color;
+  }
+}
