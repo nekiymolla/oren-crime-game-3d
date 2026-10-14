@@ -12,6 +12,7 @@ import '../controls/keyboard_controls.dart';
 import '../controls/vehicle_button.dart';
 import '../controls/virtual_joystick.dart';
 import 'arrest_banner.dart';
+import 'clock_hud.dart';
 import 'wanted_stars.dart';
 
 /// Высота нижней полосы с джойстиком/кнопками — под ней CameraControls не
@@ -125,6 +126,13 @@ class _GameHudState extends State<GameHud> {
                 right: 24,
                 top: MediaQuery.of(context).padding.top + 16,
                 child: const WantedStars(),
+              ),
+              // Часы — по центру сверху, под "чёлкой"/Dynamic Island.
+              Positioned(
+                left: 0,
+                right: 0,
+                top: MediaQuery.of(context).padding.top + 8,
+                child: Center(child: ClockHud(clock: game.clock)),
               ),
               // Не kDebugMode, а !kReleaseMode: мерить производительность
               // можно только в --profile (в debug числа не значат ничего —

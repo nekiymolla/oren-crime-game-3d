@@ -100,6 +100,10 @@ class _QualityDebugPanelState extends State<QualityDebugPanel> {
         _row('graph ${_onOff(game.roadGraphDebugVisible)}', () {
           setState(() => game.roadGraphDebugVisible = !game.roadGraphDebugVisible);
         }),
+        // Перемотка времени — посмотреть закат/ночь, не ожидая минутами.
+        _row('time +1h', () {
+          setState(() => game.clock.advance(60 * 60 / game.clock.gameMinutesPerSecond));
+        }),
       ],
     );
   }

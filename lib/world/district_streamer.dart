@@ -15,7 +15,12 @@ class DistrictStreamer {
     required this.manifest,
     required this.radiusCells,
     required this.vegetation,
+    this.onChunkLoaded,
   });
+
+  /// Чанк попал в сцену — для систем, которым нужно его содержимое
+  /// (суточный цикл ищет в нём материалы окон).
+  void Function(Node chunk)? onChunkLoaded;
 
   final Scene scene;
   final DistrictManifest manifest;
@@ -72,6 +77,7 @@ class DistrictStreamer {
             meshNode.shadowStatic = true;
           }
           scene.add(node);
+          onChunkLoaded?.call(node);
 
           // Деревья сажаются навсегда, и посаженные раньше (когда этого чанка
           // ещё не было в сцене) могли встать туда, где у него дом или

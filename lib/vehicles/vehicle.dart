@@ -235,6 +235,24 @@ BuiltVehicle buildVehicleWithSpec(
   );
 }
 
+/// Общий материал целых фар всех машин (лениво — материалы создаются
+/// только после инициализации движка).
+final PhysicallyBasedMaterial _headlightMaterial = PhysicallyBasedMaterial()
+  ..baseColorFactor = vm.Vector4(1.0, 0.98, 0.85, 1.0)
+  ..emissiveFactor = vm.Vector4(1.0, 0.95, 0.7, 1.0)
+  ..emissiveStrength = _headlightDayStrength
+  ..roughnessFactor = 0.3;
+
+const double _headlightDayStrength = 2.0;
+const double _headlightNightStrength = 9.0;
+
+/// Фары всех машин: днём тускло светятся, ночью горят (с bloom — ореол).
+/// [nightFactor] 0..1 из суточного цикла (lib/time/).
+void setHeadlightsGlow(double nightFactor) {
+  _headlightMaterial.emissiveStrength =
+      _headlightDayStrength + (_headlightNightStrength - _headlightDayStrength) * nightFactor;
+}
+
 /// Чисто декоративная машина (без контроллера/повреждений) — для "фонового"
 /// транспорта, припаркованного вдоль улиц (см. Game.load()). Всегда в
 /// исходном (pristine) виде — повреждать её нечем, раз она не участвует в
@@ -351,12 +369,10 @@ Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
     variant.add(bed);
   }
 
-  // Фары: damaged — левая разбита, wrecked — обе.
-  final workingHeadlightMaterial = PhysicallyBasedMaterial()
-    ..baseColorFactor = vm.Vector4(1.0, 0.98, 0.85, 1.0)
-    ..emissiveFactor = vm.Vector4(1.0, 0.95, 0.7, 1.0)
-    ..emissiveStrength = 2.0
-    ..roughnessFactor = 0.3;
+  // Фары: damaged — левая разбита, wrecked — обе. Целые — общий на весь
+  // город материал, чтобы ночью включать фары всем машинам одной правкой
+  // (см. setHeadlightsGlow).
+  final workingHeadlightMaterial = _headlightMaterial;
   final brokenHeadlightMaterial = PhysicallyBasedMaterial()
     ..baseColorFactor = vm.Vector4(0.25, 0.25, 0.25, 1.0)
     ..roughnessFactor = 0.9;

@@ -11,6 +11,8 @@ import '../player/character_controller_component.dart';
 import '../player/player_input_bridge_component.dart';
 import '../police/arrest_state.dart';
 import '../police/police_system.dart';
+import '../time/day_night.dart';
+import '../time/day_night_view.dart';
 import '../traffic/traffic_car.dart';
 import '../traffic/traffic_signals.dart';
 import '../traffic/traffic_signals_view.dart';
@@ -79,6 +81,16 @@ class Game {
   /// рантайме. Хранятся полями, потому что иначе до них не добраться: свет
   /// и небо строятся один раз внутри load().
   DirectionalLight? _sunLight;
+  Node? _sunNode;
+  GradientSkySource? _sky;
+
+  /// Игровое время. Старт — 16:30 14 октября: через пару реальных минут
+  /// закат (~18:30), чтобы суточный цикл было видно сразу. Сутки — 24
+  /// минуты игры (минута за секунду).
+  final GameClock clock = GameClock(hours: 16.5, dayOfYear: 287);
+
+  /// Суточный цикл на сцене (см. lib/time/).
+  late final DayNightView dayNight;
   CameraComponent? _cameraComponent;
   Skybox? _skybox;
   EnvironmentMap? _environment;
@@ -168,6 +180,19 @@ class Game {
     scene.add(ground);
     scene.add(_buildSun());
     _buildSky();
+    dayNight = DayNightView(
+      scene: scene,
+      clock: clock,
+      sunNode: _sunNode!,
+      sunLight: _sunLight!,
+      sky: _sky!,
+      shadowsAllowed: () => quality.shadowsEnabled,
+      onNightFactor: setHeadlightsGlow,
+      unlitSurfaces: [ground.mesh!.primitives.first.material as UnlitMaterial],
+    );
+    // Сразу выставить небо/свет на стартовое время — иначе первый кадр был
+    // бы дневным статичным.
+    dayNight.update(0);
 
     worldConfig = await loadWorldConfig();
     final districtManifest = await loadDistrictManifest();
@@ -219,6 +244,7 @@ class Game {
       manifest: districtManifest,
       radiusCells: worldConfig.streamingRadiusChunks,
       vegetation: vegetation,
+      onChunkLoaded: dayNight.registerChunk,
     );
     // Грузим чанки вокруг реальной точки спавна СИНХРОННО с load() (await,
     // не fire-and-forget) — GameView/тики стартуют только после того, как
@@ -464,16 +490,19 @@ class Game {
       shadowMapResolution: quality.shadowMapResolution,
     );
     _sunLight = sunLight;
-    final sunNode = Node()..addComponent(DirectionalLightComponent(sunLight));
+    final sunNode = _sunNode = Node()..addComponent(DirectionalLightComponent(sunLight));
     // Компонент светит вдоль local +Z узла, поэтому направление задаётся
     // поворотом узла, а не полем DirectionalLight.direction.
     sunNode.lookAt(_sunLightDirection);
     return sunNode;
   }
 
-  /// Простое градиентное небо-заглушка вместо чёрной пустоты — на нём же
-  /// строится ambient-освещение сцены. Заменится на PhysicalSkySource с
-  /// суточным циклом в Phase 9 (день/ночь, погода).
+  /// Градиентное небо — на нём же строится ambient-освещение сцены. Цвета
+  /// и солнце в нём каждый кадр выставляет суточный цикл (DayNightView);
+  /// освещение от неба запекается один раз, дальше меняется только его
+  /// яркость (Scene.environmentIntensity) — перезапекать каждый кадр на
+  /// слабом Android дорого. Физическое небо (PhysicalSkySource) красивее
+  /// на закате, но тоже дороже — отложено.
   void _buildSky() {
     final sky = GradientSkySource(
       zenithColor: vm.Vector3(0.20, 0.40, 0.68),
@@ -482,6 +511,7 @@ class Game {
       sunDirection: -_sunLightDirection,
       sunColor: vm.Vector3(1.0, 0.96, 0.88),
     );
+    _sky = sky;
     final skybox = Skybox(sky);
     final environment = EnvironmentMap.fromSky(sky);
     scene.skybox = skybox;
@@ -595,6 +625,7 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
+    dayNight.update(deltaSeconds);
     signals.advance(deltaSeconds);
     _signalsView.update();
     traffic.update(deltaSeconds, trackedPosition, external: _trafficObstacles(isDriving));

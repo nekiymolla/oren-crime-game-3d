@@ -58,6 +58,8 @@ rm "$RAW_FILE"
 # иначе рендер и raycast-коллизии считаются по всей геометрии сразу.
 rm -rf "$CHUNKS_DIR"
 node "$SCRIPT_DIR/grid_split.mjs" "$RECENTERED_FILE" "$CHUNKS_DIR" "$CELL_SIZE_METERS"
+# Окна домов светятся ночью — помечаем их материалы (см. скрипт).
+node "$SCRIPT_DIR/mark_night_materials.mjs" "$CHUNKS_DIR"
 rm "$RECENTERED_FILE"
 
 # Дорожный граф (highway=* из сырого .osm) для будущих NPC/трафика/полиции
