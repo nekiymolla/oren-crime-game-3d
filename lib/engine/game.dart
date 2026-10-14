@@ -14,6 +14,8 @@ import '../police/police_system.dart';
 import '../time/day_night.dart';
 import '../time/day_night_view.dart';
 import '../traffic/traffic_car.dart';
+import '../weather/weather.dart';
+import '../weather/weather_view.dart';
 import '../traffic/traffic_signals.dart';
 import '../traffic/traffic_signals_view.dart';
 import '../traffic/traffic_system.dart';
@@ -91,6 +93,11 @@ class Game {
 
   /// Суточный цикл на сцене (см. lib/time/).
   late final DayNightView dayNight;
+
+  /// Погода: ясно/облачно/дождь/снег/... и её эффекты (lib/weather/). Старт
+  /// — ясно, чтобы первым игрок увидел закат в духе Вайс-Сити.
+  final WeatherSystem weather = WeatherSystem(initial: WeatherKind.clear);
+  late final WeatherView _weatherView;
   CameraComponent? _cameraComponent;
   Skybox? _skybox;
   EnvironmentMap? _environment;
@@ -190,9 +197,16 @@ class Game {
       onNightFactor: setHeadlightsGlow,
       unlitSurfaces: [ground.mesh!.primitives.first.material as UnlitMaterial],
     );
+    _weatherView = WeatherView(
+      scene: scene,
+      godRaysAllowed: () => quality.godRaysEnabled,
+      bloomAllowed: () => quality.bloomEnabled,
+      maxParticles: quality.precipitationParticles,
+    );
+    scene.add(_weatherView.buildNode());
     // Сразу выставить небо/свет на стартовое время — иначе первый кадр был
     // бы дневным статичным.
-    dayNight.update(0);
+    dayNight.update(0, weather: weather.params);
 
     worldConfig = await loadWorldConfig();
     final districtManifest = await loadDistrictManifest();
@@ -510,6 +524,9 @@ class Game {
       groundColor: vm.Vector3(0.30, 0.30, 0.27),
       sunDirection: -_sunLightDirection,
       sunColor: vm.Vector3(1.0, 0.96, 0.88),
+      // Крупный мягкий диск солнца (по умолчанию 400 — точка): с bloom и
+      // бликом линз — солнце в духе Вайс-Сити.
+      sunSharpness: 90.0,
     );
     _sky = sky;
     final skybox = Skybox(sky);
@@ -625,7 +642,7 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
-    dayNight.update(deltaSeconds);
+    _updateWeather(deltaSeconds);
     signals.advance(deltaSeconds);
     _signalsView.update();
     traffic.update(deltaSeconds, trackedPosition, external: _trafficObstacles(isDriving));
@@ -644,6 +661,22 @@ class Game {
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
     }
+  }
+
+  /// Погода и суточный цикл — в одном месте, порядок важен: молния ->
+  /// свет/небо (с вспышкой) -> пост-эффекты и осадки под этот свет ->
+  /// смена погоды по игровым часам.
+  void _updateWeather(double deltaSeconds) {
+    final params = weather.params;
+    _weatherView.updateLightning(deltaSeconds, params);
+    dayNight.update(deltaSeconds, weather: params, lightningFlash: _weatherView.lightningFlash);
+    _weatherView.update(deltaSeconds, dayNight.lighting!, params, cameraNode.globalTransform.getTranslation());
+    weather.update(
+      deltaSeconds,
+      gameHoursPassed: deltaSeconds * clock.gameMinutesPerSecond / 60.0,
+      dayOfYear: clock.dayOfYear,
+    );
+    _vegetation?.setSnowCover(params.snowCover);
   }
 
   /// То, перед чем тормозит трафик помимо друг друга: игрок (пешком или

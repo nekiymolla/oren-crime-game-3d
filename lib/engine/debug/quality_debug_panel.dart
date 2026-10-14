@@ -101,6 +101,9 @@ class _QualityDebugPanelState extends State<QualityDebugPanel> {
           setState(() => game.roadGraphDebugVisible = !game.roadGraphDebugVisible);
         }),
         // Перемотка времени — посмотреть закат/ночь, не ожидая минутами.
+        _row('weather: ${game.weather.kind.label}', () {
+          setState(game.weather.cycle);
+        }),
         _row('time +1h', () {
           setState(() => game.clock.skipHours(1));
         }),

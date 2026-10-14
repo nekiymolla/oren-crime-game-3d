@@ -132,7 +132,7 @@ class _GameHudState extends State<GameHud> {
                 left: 0,
                 right: 0,
                 top: MediaQuery.of(context).padding.top + 8,
-                child: Center(child: ClockHud(clock: game.clock)),
+                child: Center(child: ClockHud(clock: game.clock, weather: game.weather)),
               ),
               // Не kDebugMode, а !kReleaseMode: мерить производительность
               // можно только в --profile (в debug числа не значат ничего —

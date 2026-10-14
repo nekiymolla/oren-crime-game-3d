@@ -114,6 +114,34 @@ class SkyLighting {
   /// свет не действует, и без этого ночью земля оставалась ярко-зелёной
   /// под чёрным небом. Днём (1, 1, 1) — дневной вид не меняется.
   final vm.Vector3 unlitTint;
+
+  /// Насколько сейчас "золотой час" (закат/рассвет/сумерки): 1 — солнце у
+  /// горизонта, 0 — высоко или глубокая ночь. По нему — неоновый
+  /// грейдинг в духе Вайс-Сити и свечение дымки к солнцу.
+  double get goldenHour => (1.0 - _smoothstep(0.0, 0.28, sunElevation.abs())) * (1.0 - nightFactor * 0.6);
+
+  SkyLighting copyWith({
+    double? lightIntensity,
+    bool? castsShadow,
+    double? environmentIntensity,
+    vm.Vector3? zenithColor,
+    vm.Vector3? horizonColor,
+    vm.Vector3? sunDiskColor,
+    vm.Vector3? unlitTint,
+  }) => SkyLighting(
+    lightDirection: lightDirection,
+    lightColor: lightColor,
+    lightIntensity: lightIntensity ?? this.lightIntensity,
+    castsShadow: castsShadow ?? this.castsShadow,
+    environmentIntensity: environmentIntensity ?? this.environmentIntensity,
+    zenithColor: zenithColor ?? this.zenithColor,
+    horizonColor: horizonColor ?? this.horizonColor,
+    groundColor: groundColor,
+    sunDiskColor: sunDiskColor ?? this.sunDiskColor,
+    nightFactor: nightFactor,
+    sunElevation: sunElevation,
+    unlitTint: unlitTint ?? this.unlitTint,
+  );
 }
 
 /// Дневные числа — те же, что были у статичного неба до суточного цикла
@@ -121,10 +149,12 @@ class SkyLighting {
 final vm.Vector3 _dayZenith = vm.Vector3(0.20, 0.40, 0.68);
 final vm.Vector3 _dayHorizon = vm.Vector3(0.72, 0.80, 0.85);
 final vm.Vector3 _dayGround = vm.Vector3(0.30, 0.30, 0.27);
-final vm.Vector3 _sunsetZenith = vm.Vector3(0.22, 0.27, 0.50);
-final vm.Vector3 _sunsetHorizon = vm.Vector3(0.95, 0.55, 0.32);
-final vm.Vector3 _nightZenith = vm.Vector3(0.008, 0.012, 0.035);
-final vm.Vector3 _nightHorizon = vm.Vector3(0.035, 0.045, 0.085);
+// Закат и ночь — в духе Вайс-Сити: розово-оранжевый горизонт под
+// фиолетовым зенитом, ночью — глубокий сине-фиолетовый, а не серо-чёрный.
+final vm.Vector3 _sunsetZenith = vm.Vector3(0.34, 0.20, 0.52);
+final vm.Vector3 _sunsetHorizon = vm.Vector3(1.0, 0.46, 0.36);
+final vm.Vector3 _nightZenith = vm.Vector3(0.016, 0.01, 0.045);
+final vm.Vector3 _nightHorizon = vm.Vector3(0.06, 0.035, 0.1);
 final vm.Vector3 _nightGround = vm.Vector3(0.02, 0.02, 0.025);
 
 /// Луна — без своей орбиты: висит высоко на юго-востоке и даёт ночью

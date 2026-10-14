@@ -2,13 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../../time/day_night.dart';
+import '../../weather/weather.dart';
 
 /// Игровые часы в HUD. Как и WantedStars, опрашивает [clock] своим Ticker
 /// и перестраивается, только когда сменилась минута.
 class ClockHud extends StatefulWidget {
-  const ClockHud({super.key, required this.clock});
+  const ClockHud({super.key, required this.clock, required this.weather});
 
   final GameClock clock;
+  final WeatherSystem weather;
 
   @override
   State<ClockHud> createState() => _ClockHudState();
@@ -21,12 +23,14 @@ class _ClockHudState extends State<ClockHud> with SingleTickerProviderStateMixin
   @override
   void initState() {
     super.initState();
-    _label = widget.clock.label;
+    _label = _text();
     _ticker = createTicker((_) {
-      final label = widget.clock.label;
+      final label = _text();
       if (label != _label) setState(() => _label = label);
     })..start();
   }
+
+  String _text() => '${widget.clock.label} · ${widget.weather.kind.label}';
 
   @override
   void dispose() {

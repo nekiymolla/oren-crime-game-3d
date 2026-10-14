@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../weather/weather.dart';
+import '../weather/weather_lighting.dart';
 import 'day_night.dart';
 
 /// Применяет [GameClock] к сцене: солнце/луна, цвет неба, освещение от
@@ -57,6 +59,9 @@ class DayNightView {
   static final vm.Vector4 _windowGlow = vm.Vector4(1.0, 0.78, 0.45, 1.0);
   static const double _windowGlowStrength = 2.2;
 
+  /// Снег на земле — не чисто белый, иначе днём выжигается в тонмаппинге.
+  static final vm.Vector3 _snowColor = vm.Vector3(0.82, 0.85, 0.9);
+
   SkyLighting? get lighting => _last;
 
   /// Чанк района загружен — находим в нём ночные материалы.
@@ -72,9 +77,15 @@ class DayNightView {
     }
   }
 
-  void update(double deltaSeconds) {
+  /// [weather] — погода поверх суточного цикла (облака гасят солнце,
+  /// молния вспыхивает), [lightningFlash] — яркость вспышки сейчас.
+  void update(double deltaSeconds, {WeatherParams? weather, double lightningFlash = 0.0}) {
     clock.advance(deltaSeconds);
-    final lighting = _last = evaluateSky(clock.hours, clock.dayOfYear);
+    final clear = evaluateSky(clock.hours, clock.dayOfYear);
+    final lighting = _last = weather == null
+        ? clear
+        : applyWeather(clear, weather, lightningFlash: lightningFlash);
+    final snowCover = weather?.snowCover ?? 0.0;
 
     sky
       ..zenithColor = lighting.zenithColor
@@ -85,8 +96,12 @@ class DayNightView {
     scene.environmentIntensity = lighting.environmentIntensity;
     final tint = lighting.unlitTint;
     for (var i = 0; i < unlitSurfaces.length; i++) {
+      // Снег ложится на подложку-газон: цвет уходит к белому.
       final day = _unlitDayColors[i];
-      unlitSurfaces[i].baseColorFactor = vm.Vector4(day.x * tint.x, day.y * tint.y, day.z * tint.z, day.w);
+      final r = day.x + (_snowColor.x - day.x) * snowCover;
+      final g = day.y + (_snowColor.y - day.y) * snowCover;
+      final b = day.z + (_snowColor.z - day.z) * snowCover;
+      unlitSurfaces[i].baseColorFactor = vm.Vector4(r * tint.x, g * tint.y, b * tint.z, day.w);
     }
 
     sunLight

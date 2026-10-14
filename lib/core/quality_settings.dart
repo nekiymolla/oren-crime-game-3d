@@ -28,6 +28,8 @@ class QualitySettings {
     required this.pedestrianPopulation,
     this.trafficPopulation = 8,
     required this.maxTrees,
+    this.godRaysEnabled = true,
+    this.precipitationParticles = 800,
   });
 
   factory QualitySettings.fromJson(String name, Map<String, dynamic> json) => QualitySettings(
@@ -46,6 +48,8 @@ class QualitySettings {
     pedestrianPopulation: json['pedestrianPopulation'] as int,
     // Необязательное: конфиги до появления трафика читаются как 8.
     trafficPopulation: json['trafficPopulation'] as int? ?? 8,
+    godRaysEnabled: json['godRaysEnabled'] as bool? ?? true,
+    precipitationParticles: json['precipitationParticles'] as int? ?? 800,
     maxTrees: json['maxTrees'] as int,
   );
 
@@ -76,6 +80,15 @@ class QualitySettings {
   final int trafficPopulation;
   final int maxTrees;
 
+  /// Лучи солнца (god rays) — экранный проход с марш-шагами по глубине,
+  /// самый дорогой из погодных эффектов. Читается каждый кадр, так что
+  /// переключение пресета действует сразу.
+  final bool godRaysEnabled;
+
+  /// Сколько капель/снежинок вокруг камеры при максимальных осадках —
+  /// каждая пересчитывается каждый кадр. Мировая настройка (в load()).
+  final int precipitationParticles;
+
   /// Для debug-панели: снять один фактор, не трогая остальные. Пресеты
   /// отличаются сразу многим, а чтобы понять, что именно стоит дорого,
   /// нужно менять по одному (см. PROGRESS.md — на угадывании уже теряли
@@ -100,6 +113,8 @@ class QualitySettings {
     pedestrianPopulation: pedestrianPopulation,
     trafficPopulation: trafficPopulation,
     maxTrees: maxTrees,
+    godRaysEnabled: godRaysEnabled,
+    precipitationParticles: precipitationParticles,
   );
 
   static AntiAliasingMode _parseAntiAliasing(String raw) => switch (raw) {

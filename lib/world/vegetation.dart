@@ -52,6 +52,18 @@ class VegetationBatch {
   Node? _node;
   bool _shadowCacheDirty = false;
 
+  late final vm.Vector4 _canopyGreen = (canopies.material as PhysicallyBasedMaterial).baseColorFactor.clone();
+  double _appliedSnow = 0.0;
+
+  /// Снег на кронах (0..1, см. WeatherParams.snowCover): зелень уходит к
+  /// белому. Один общий материал — одна правка на все деревья.
+  void setSnowCover(double cover) {
+    if ((cover - _appliedSnow).abs() < 0.01) return;
+    _appliedSnow = cover;
+    final white = vm.Vector4(0.85, 0.88, 0.92, 1.0);
+    (canopies.material as PhysicallyBasedMaterial).baseColorFactor = _canopyGreen + (white - _canopyGreen) * cover;
+  }
+
   /// Один узел на всю растительность игры — держит оба InstancedMesh.
   /// Не привязан к чанкам: инстансы внутри можно добавлять/убирать, сам
   /// узел из сцены не удаляется.

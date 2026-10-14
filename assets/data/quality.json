@@ -15,6 +15,8 @@
       "drawDistanceMeters": 350.0,
       "pedestrianPopulation": 8,
       "trafficPopulation": 4,
+      "godRaysEnabled": false,
+      "precipitationParticles": 300,
       "maxTrees": 80
     },
     "medium": {
@@ -29,6 +31,8 @@
       "drawDistanceMeters": 500.0,
       "pedestrianPopulation": 12,
       "trafficPopulation": 6,
+      "godRaysEnabled": true,
+      "precipitationParticles": 600,
       "maxTrees": 150
     },
     "high": {
@@ -44,6 +48,8 @@
       "drawDistanceMeters": 1000.0,
       "pedestrianPopulation": 16,
       "trafficPopulation": 10,
+      "godRaysEnabled": true,
+      "precipitationParticles": 1200,
       "maxTrees": 220
     }
   }
