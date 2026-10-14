@@ -39,7 +39,15 @@ class VegetationBatch {
 
   final InstancedMesh trunks;
   final InstancedMesh canopies;
-  int _treeCount = 0;
+
+  /// Корни стволов посаженных деревьев — индекс совпадает с индексом
+  /// инстанса в [trunks]/[canopies]. Нужны, чтобы выкорчевать дерево,
+  /// оказавшееся внутри дома/дороги из чанка, догруженного позже (см.
+  /// [removeTreesWhere]).
+  final List<vm.Vector3> _treePositions = [];
+  final List<double> _treeScales = [];
+
+  int get treeCount => _treePositions.length;
 
   Node? _node;
   bool _shadowCacheDirty = false;
@@ -75,10 +83,10 @@ class VegetationBatch {
   /// [scale] — случайный разброс размера для естественности. Не делает
   /// ничего сверх [maxTrees] — см. его комментарий.
   void addTree(vm.Vector3 position, {double scale = 1.0}) {
-    if (_treeCount >= maxTrees) return;
-    _treeCount++;
-    _shadowCacheDirty = true;
-    _node?.shadowStatic = false;
+    if (_treePositions.length >= maxTrees) return;
+    _treePositions.add(position.clone());
+    _treeScales.add(scale);
+    _markShadowCacheDirty();
     trunks.addInstance(
       vm.Matrix4.compose(
         position + vm.Vector3(0, _trunkHeight * scale / 2, 0),
@@ -94,17 +102,67 @@ class VegetationBatch {
       ),
     );
   }
+
+  /// Убирает деревья, для которых [test] (корень ствола, масштаб) вернул
+  /// true. Освободившиеся места под [maxTrees] достаются следующим посадкам.
+  void removeTreesWhere(bool Function(vm.Vector3 position, double scale) test) {
+    // С конца: removeInstanceAt сдвигает индексы всех следующих инстансов.
+    for (var i = _treePositions.length - 1; i >= 0; i--) {
+      if (!test(_treePositions[i], _treeScales[i])) continue;
+      _treePositions.removeAt(i);
+      _treeScales.removeAt(i);
+      trunks.removeInstanceAt(i);
+      canopies.removeInstanceAt(i);
+      _markShadowCacheDirty();
+    }
+  }
+
+  void _markShadowCacheDirty() {
+    _shadowCacheDirty = true;
+    _node?.shadowStatic = false;
+  }
 }
 
-/// Раскидывает деревья по [chunkRoot] случайными точками в квадрате
-/// [cellSizeMeters] с центром в [cellCenter] — но только там, где
-/// вертикальный [raycastNode] по САМОМУ ЭТОМУ чанку ничего не находит
-/// (то есть в местах, где OSM ничего не разметил и показывается только
-/// плейсхолдер-земля, см. terrain.dart) — гарантированно не в зданиях и
-/// не на дорогах, без отдельного анализа footprint'ов в пайплайне.
+/// Радиус кроны дерева масштаба 1 (IcosphereGeometry радиуса 1.0) — по нему
+/// проверяется, что крона не влезает в стену дома или не висит над дорогой.
+const double treeCanopyRadius = 1.0;
+
+/// Свободно ли место под дерево в точке ([x], [z]) с кроной [radius]: пять
+/// вертикальных лучей (ствол + четыре края кроны) по каждому из [roots] не
+/// должны ничего найти. Хватит одного попадания — здание, дорога, тротуар.
+///
+/// Именно по всем загруженным чанкам, а не только по "своему": меши
+/// раскладываются по ячейкам по центру bbox'а (grid_split.mjs), так что дом
+/// или длинная дорога из соседней ячейки физически лежат и в этой.
+bool isTreeSpotClear(Iterable<Node> roots, double x, double z, double radius) {
+  const offsets = [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)];
+  for (final root in roots) {
+    for (final (dx, dz) in offsets) {
+      final hit = raycastNode(
+        root,
+        vm.Ray.originDirection(
+          vm.Vector3(x + dx * radius, 50, z + dz * radius),
+          vm.Vector3(0, -1, 0),
+        ),
+        maxDistance: 100,
+      );
+      if (hit != null) return false;
+    }
+  }
+  return true;
+}
+
+/// Раскидывает деревья случайными точками в квадрате [cellSizeMeters] с
+/// центром в [cellCenter] — только там, где [isTreeSpotClear] по всем
+/// [obstacleRoots] (загруженные чанки района) ничего не находит, то есть
+/// там, где OSM ничего не разметил и видна только плейсхолдер-земля (см.
+/// terrain.dart).
+///
+/// Чанки, которые загрузятся позже, этой проверкой не покрыты — их деревья
+/// выкорчёвывает [DistrictStreamer] при загрузке (см. [removeTreesWhere]).
 void scatterTreesForChunk({
   required VegetationBatch vegetation,
-  required Node chunkRoot,
+  required Iterable<Node> obstacleRoots,
   required vm.Vector2 cellCenter,
   required double cellSizeMeters,
   int attempts = 24,
@@ -115,12 +173,8 @@ void scatterTreesForChunk({
   for (var i = 0; i < attempts; i++) {
     final x = cellCenter.x + (rng.nextDouble() * 2 - 1) * half;
     final z = cellCenter.y + (rng.nextDouble() * 2 - 1) * half;
-    final hit = raycastNode(
-      chunkRoot,
-      vm.Ray.originDirection(vm.Vector3(x, 50, z), vm.Vector3(0, -1, 0)),
-      maxDistance: 100,
-    );
-    if (hit != null) continue; // тут уже что-то есть (здание, дорога, ...)
-    vegetation.addTree(vm.Vector3(x, 0, z), scale: 0.8 + rng.nextDouble() * 0.5);
+    final scale = 0.8 + rng.nextDouble() * 0.5;
+    if (!isTreeSpotClear(obstacleRoots, x, z, treeCanopyRadius * scale)) continue;
+    vegetation.addTree(vm.Vector3(x, 0, z), scale: scale);
   }
 }

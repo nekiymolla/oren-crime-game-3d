@@ -27,8 +27,9 @@ class DistrictStreamer {
 
   /// Чанки, для которых уже раскидали деревья (см. vegetation.dart) — не
   /// сажаем второй раз, если игрок уходит и возвращается: посаженные деревья
-  /// остаются в общем InstancedMesh даже после выгрузки самого чанка (их
-  /// координаты не зависят от того, загружен ли рядом лежащий район).
+  /// остаются в общем InstancedMesh даже после выгрузки самого чанка. Те,
+  /// что встали на геометрию ещё не загруженного соседа, выкорчёвываются при
+  /// его загрузке (см. updateAroundPosition).
   final Set<String> _vegetationScattered = {};
 
   /// Пересчитывает нужный набор чанков и догружает/выгружает разницу.
@@ -72,10 +73,27 @@ class DistrictStreamer {
           }
           scene.add(node);
 
+          // Деревья сажаются навсегда, и посаженные раньше (когда этого чанка
+          // ещё не было в сцене) могли встать туда, где у него дом или
+          // дорога — меши выходят за границы своей ячейки. Проверяем только
+          // те, что попадают в bbox чанка с запасом на крону.
+          final bounds = node.combinedWorldBounds;
+          vegetation.removeTreesWhere((position, scale) {
+            final radius = treeCanopyRadius * scale;
+            if (bounds != null &&
+                (position.x < bounds.min.x - radius ||
+                    position.x > bounds.max.x + radius ||
+                    position.z < bounds.min.z - radius ||
+                    position.z > bounds.max.z + radius)) {
+              return false;
+            }
+            return !isTreeSpotClear([node], position.x, position.z, radius);
+          });
+
           if (_vegetationScattered.add(chunk.id)) {
             scatterTreesForChunk(
               vegetation: vegetation,
-              chunkRoot: node,
+              obstacleRoots: _loaded.values,
               cellCenter: vm.Vector2(
                 (chunk.cellX + 0.5) * manifest.cellSizeMeters,
                 (chunk.cellZ + 0.5) * manifest.cellSizeMeters,
