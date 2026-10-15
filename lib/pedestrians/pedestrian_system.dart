@@ -4,8 +4,13 @@ import 'dart:typed_data';
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../weapons/ballistics.dart';
+import '../weapons/player_shooting.dart';
 import '../world/road_graph.dart';
 import 'pedestrian.dart';
+
+/// Пуля попала в пешехода (см. PedestrianSystem.raycastShootable).
+typedef PedestrianShotHit = ({int index, double distance, BodyZone zone});
 
 /// Держит NPC-пешеходов вокруг игрока/машины: спавнит рядом
 /// ([spawnRadius]), переселяет в кольцо [minRespawnDistance]..[spawnRadius],
@@ -19,7 +24,7 @@ import 'pedestrian.dart';
 /// (все ~0, ровная земля), рейкастить незачем — а с N пешеходов это было
 /// бы N лишних raycastNode на кадр, ровно та проблема с лагами, что
 /// разбирали на Android этим утром (см. PROGRESS.md).
-class PedestrianSystem {
+class PedestrianSystem implements ShootTargets {
   PedestrianSystem({
     required this.graph,
     required this.raycastRoot,
@@ -95,6 +100,69 @@ class PedestrianSystem {
 
   /// Радиус капсулы пешехода — для препятствий трафика.
   static const double bodyRadius = _radius;
+
+  /// Полный рост пешехода — для попаданий и автоприцела.
+  static const double bodyHeight = _totalHeight;
+
+  /// Тело убитого убирается (пешеход переселяется), только если лежит
+  /// дольше этого и игрок не ближе [_bodyCleanupDistance] — на глазах
+  /// трупы не исчезают.
+  static const double _bodyCleanupSeconds = 45.0;
+  static const double _bodyCleanupDistance = 60.0;
+
+  /// Пуля по лучу: ближайший живой стоящий пешеход, в которого попадает
+  /// луч из [origin] вдоль единичного [direction] не дальше [maxDistance].
+  @override
+  PedestrianShotHit? raycastShootable(vm.Vector3 origin, vm.Vector3 direction, double maxDistance) {
+    PedestrianShotHit? best;
+    for (var i = 0; i < _pedestrians.length; i++) {
+      final pedestrian = _pedestrians[i];
+      if (!pedestrian.isShootable) continue;
+      final limit = best?.distance ?? maxDistance;
+      final t = rayVerticalCapsule(origin, direction, limit, pedestrian.position, _radius, _totalHeight);
+      if (t == null) continue;
+      final hitY = origin.y + direction.y * t;
+      best = (index: i, distance: t, zone: zoneForHitHeight(hitY - pedestrian.position.y, _totalHeight));
+    }
+    return best;
+  }
+
+  /// Пуля попала в пешехода [index]: урон [damage] от стрелка в [from].
+  /// Возвращает true, если убит.
+  @override
+  bool applyShot(int index, double damage, vm.Vector3 from) {
+    final pedestrian = _pedestrians[index];
+    final killed = pedestrian.takeDamage(damage, from);
+    if (!killed) pedestrian.scare(from, graph);
+    bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+    return killed;
+  }
+
+  /// Выстрел в [shooter] слышно на [radius] метров: все живые рядом
+  /// бегут прочь. Возвращает, сколько было свидетелей.
+  @override
+  int scareAround(vm.Vector3 shooter, double radius) {
+    final radiusSq = radius * radius;
+    var witnesses = 0;
+    for (final pedestrian in _pedestrians) {
+      if (pedestrian.isDead || (pedestrian.position - shooter).length2 > radiusSq) continue;
+      pedestrian.scare(shooter, graph);
+      witnesses++;
+    }
+    return witnesses;
+  }
+
+  /// Точки прицеливания (грудь) живых стоящих пешеходов — для
+  /// автоприцела. [indices] получает их номера для [applyShot].
+  @override
+  void collectAimPoints(List<vm.Vector3> points, List<int> indices) {
+    for (var i = 0; i < _pedestrians.length; i++) {
+      final pedestrian = _pedestrians[i];
+      if (!pedestrian.isShootable) continue;
+      points.add(pedestrian.position + vm.Vector3(0, _totalHeight * 0.65, 0));
+      indices.add(i);
+    }
+  }
 
   /// Материал для [buildDebugTargetLinesNode] — ярко-розовый, не пересекается
   /// с жёлтыми линиями дорожного графа (см. road_graph.dart), чтобы оба
@@ -193,13 +261,19 @@ class PedestrianSystem {
       );
       if (arrived) _ensurePassableTarget(pedestrian);
 
-      // Лежачего повторно не сбить и не засчитать второй раз в розыск.
+      // Лежачего (и мёртвого) повторно не сбить и не засчитать второй раз
+      // в розыск.
       if (canHit &&
           !pedestrian.isKnockedDown &&
+          !pedestrian.isDead &&
           (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {
         hits++;
         pedestrian.knockDown(vehiclePosition, vehicleSpeed);
       } else if ((pedestrian.position - trackedPosition).length2 > despawnRadiusSq) {
+        _respawnNear(pedestrian, trackedPosition);
+      } else if (pedestrian.isDead &&
+          pedestrian.deadSeconds > _bodyCleanupSeconds &&
+          (pedestrian.position - trackedPosition).length2 > _bodyCleanupDistance * _bodyCleanupDistance) {
         _respawnNear(pedestrian, trackedPosition);
       }
 
@@ -208,11 +282,11 @@ class PedestrianSystem {
     return hits;
   }
 
-  /// Стоящий — капсула вертикально по курсу; сбитый — лежит на земле
+  /// Стоящий — капсула вертикально по курсу; сбитый или убитый — лежит на земле
   /// вдоль направления отлёта (поворот на 90° вокруг своей поперечной оси).
   vm.Matrix4 _instanceTransform(Pedestrian pedestrian) {
     final heading = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), pedestrian.yaw);
-    if (!pedestrian.isKnockedDown) {
+    if (!pedestrian.isKnockedDown && !pedestrian.isDead) {
       return vm.Matrix4.compose(
         pedestrian.position + vm.Vector3(0, _totalHeight / 2, 0),
         heading,
@@ -279,7 +353,9 @@ class PedestrianSystem {
       ..targetNodeId = target
       ..returnPoint = start.toVector3()
       ..knockedDownSeconds = 0.0
-      ..panicSeconds = 8.0;
+      ..panicSeconds = 8.0
+      ..fleeFrom = awayFrom.clone()
+      ..revive();
   }
 
   RoadGraphNode _nearestWalkableNode(vm.Vector3 position) {
@@ -309,7 +385,9 @@ class PedestrianSystem {
       ..targetNodeId = fresh.targetNodeId
       ..knockedDownSeconds = 0.0
       ..panicSeconds = 0.0
-      ..returnPoint = null;
+      ..fleeFrom = null
+      ..returnPoint = null
+      ..revive();
   }
 
   Pedestrian _createAt(RoadGraphNode node) {

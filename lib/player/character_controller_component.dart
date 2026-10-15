@@ -66,6 +66,9 @@ class CharacterControllerComponent extends Component {
 
   void jump() => motion.jump();
 
+  /// См. CharacterMotion.facingYawOverride.
+  set facingYawOverride(double? yaw) => motion.facingYawOverride = yaw;
+
   vm.Vector3 get velocity => motion.velocity;
   bool get isGrounded => motion.isGrounded;
 

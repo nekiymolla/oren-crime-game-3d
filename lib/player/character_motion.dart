@@ -149,6 +149,10 @@ class CharacterMotion {
   /// Курс персонажа (рад), та же конвенция yaw, что у FollowCameraController.
   double get yaw => _yaw;
 
+  /// Куда смотреть независимо от движения (прицеливание: корпус к
+  /// прицелу, ходьба вбок/назад — стрейф). null — корпус по движению.
+  double? facingYawOverride;
+
   /// Горизонтальная скорость, м/с — для HUD/анимаций.
   double get horizontalSpeed => math.sqrt(
     velocity.x * velocity.x + velocity.z * velocity.z,
@@ -218,6 +222,13 @@ class CharacterMotion {
     // 4. Горизонтальная скорость по вводу (экспоненциальное сглаживание —
     // мгновенная смена скорости ощущается как телепорт).
     _integrateHorizontal(dt, isTooSteep: isTooSteep);
+    final facing = facingYawOverride;
+    if (facing != null) {
+      // Быстрее обычного доворота: выстрел идёт сразу, корпус не должен
+      // заметно отставать от прицела.
+      final angleDiff = (facing - _yaw + math.pi) % (2 * math.pi) - math.pi;
+      _yaw += angleDiff * (1.0 - math.exp(-turnSpeed * 2.5 * dt));
+    }
 
     // 5. Обход препятствий — кольцо лучей вокруг тела.
     var move = vm.Vector3(velocity.x, 0.0, velocity.z) * dt;
@@ -301,9 +312,12 @@ class CharacterMotion {
       // Доворот корпуса к направлению движения по кратчайшей дуге (оператор %
       // для double в Dart всегда неотрицателен, поэтому разница попадает
       // ровно в [-pi, pi)).
-      final targetYaw = math.atan2(desired.x, desired.y);
-      final angleDiff = (targetYaw - _yaw + math.pi) % (2 * math.pi) - math.pi;
-      _yaw += angleDiff * (1.0 - math.exp(-turnSpeed * dt));
+      // При прицеливании корпус держит прицел (см. facingYawOverride).
+      if (facingYawOverride == null) {
+        final targetYaw = math.atan2(desired.x, desired.y);
+        final angleDiff = (targetYaw - _yaw + math.pi) % (2 * math.pi) - math.pi;
+        _yaw += angleDiff * (1.0 - math.exp(-turnSpeed * dt));
+      }
     } else {
       final friction = isGrounded ? 12.0 : 2.0;
       final t = 1.0 - math.exp(-friction * dt);

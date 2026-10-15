@@ -4,10 +4,12 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../core/game_mode.dart';
+import '../core/input/input_state.dart';
 import '../core/quality_settings.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/character_collision_field.dart';
 import '../player/character_controller_component.dart';
+import '../player/game_camera_controller.dart';
 import '../player/player_input_bridge_component.dart';
 import '../police/arrest_state.dart';
 import '../police/police_system.dart';
@@ -24,6 +26,10 @@ import '../police/wanted_state.dart';
 import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
 import '../vehicles/vehicle_spec.dart';
+import '../weapons/player_shooting.dart';
+import '../weapons/weapon_config.dart';
+import '../weapons/weapon_effects_view.dart';
+import '../weapons/weapon_state.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
 import '../world/neon_signs.dart';
@@ -146,7 +152,20 @@ class Game {
   /// Публичный, чтобы GameHud мог подключить [CameraControls] — сам
   /// контроллер прикреплён к cameraNode как компонент и двигает камеру
   /// каждый кадр независимо от того, кто шлёт в него drag-события.
-  late final FollowCameraController cameraController;
+  late final GameCameraController cameraController;
+
+  /// Оружие в руках (lib/weapons/) — HUD читает патроны и перезарядку.
+  late final WeaponState weapon;
+  late final PlayerShooting _shooting;
+  late final WeaponEffectsView _weaponEffects;
+
+  /// Сколько ещё секунд камера держится за плечом после выстрела — чтобы
+  /// между нажатиями она не прыгала туда-обратно.
+  double _aimHoldSeconds = 0.0;
+  static const double _aimHoldAfterShot = 1.5;
+
+  /// Целимся сейчас — HUD показывает прицел.
+  bool get isAiming => cameraController.aiming;
 
   /// С запасом покрывает весь загружаемый чанками район (~1900x1600 м, см.
   /// PROGRESS.md) — плоскость всего 2 треугольника, размер почти бесплатен,
@@ -328,8 +347,9 @@ class Game {
     // добавляются отдельными корнями (и только когда игрок рядом, иначе
     // каждый луч обходил бы их поддеревья впустую). Патрульные машины
     // приходят колбэком: их набор меняется по звёздам розыска.
+    _decorCars.addAll([parkedHatchback, parkedPickup]);
     collisionField.addColliderSource(
-      () => [vehicle.node, for (final car in _parkedPlayerCars) car.node, parkedHatchback, parkedPickup],
+      () => [vehicle.node, for (final car in _parkedPlayerCars) car.node, ..._decorCars],
     );
     collisionField.addColliderSource(() => policeSystem.unitNodes);
     collisionField.addColliderSource(() => traffic.carNodes);
@@ -344,7 +364,7 @@ class Game {
     // горизонтом — ни луну, ни высокое солнце не увидеть. Разрешаем до
     // ~57°, а камеру при взгляде вверх подтягиваем к персонажу, чтобы не
     // уходила под землю (см. _keepCameraAboveGround).
-    cameraController = FollowCameraController(
+    cameraController = GameCameraController(
       followTarget: playerNode,
       distance: _cameraDistance,
       lookHeight: 1.5,
@@ -357,6 +377,12 @@ class Game {
     // а не "куда сейчас смотрит персонаж") — мосту нужен уже готовый
     // cameraController, поэтому он добавляется последним.
     playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController));
+
+    final weapons = await loadWeaponCatalog();
+    weapon = WeaponState(weapons.defaultWeapon);
+    _shooting = PlayerShooting(weapon: weapon, targets: pedestrians, worldRaycast: _bulletRaycast);
+    _weaponEffects = WeaponEffectsView();
+    scene.add(_weaponEffects.buildNode());
   }
 
   /// Применяет рендерную часть пресета к уже живой сцене — ради этого
@@ -665,6 +691,78 @@ class Game {
     return node;
   }
 
+  /// Декоративные припаркованные машины у спавна — в них упираются
+  /// персонаж и пули.
+  final List<Node> _decorCars = [];
+  final List<Node> _bulletCandidates = [];
+  final vm.Aabb3 _bulletBox = vm.Aabb3();
+
+  /// Луч пули против мира: чанки района вдоль луча и машины рядом с ним.
+  /// Пешеходы — отдельно, аналитически (PedestrianSystem.raycastShootable).
+  double? _bulletRaycast(vm.Vector3 origin, vm.Vector3 direction, double maxDistance) {
+    final end = origin + direction * maxDistance;
+    _bulletBox
+      ..min.setValues(math.min(origin.x, end.x), math.min(origin.y, end.y), math.min(origin.z, end.z))
+      ..max.setValues(math.max(origin.x, end.x), math.max(origin.y, end.y), math.max(origin.z, end.z));
+    _bulletCandidates.clear();
+    districtStreamer.collectChunksOverlapping(_bulletBox, _bulletCandidates);
+    final reachSq = (maxDistance + 4.0) * (maxDistance + 4.0);
+    final cars = [
+      vehicle.node,
+      for (final car in _parkedPlayerCars) car.node,
+      ..._decorCars,
+      ...traffic.carNodes,
+      ...policeSystem.unitNodes,
+    ];
+    for (final car in cars) {
+      if ((car.globalTransform.getTranslation() - origin).length2 <= reachSq) _bulletCandidates.add(car);
+    }
+
+    final ray = vm.Ray.originDirection(origin, direction);
+    double? nearest;
+    for (final root in _bulletCandidates) {
+      final hit = raycastNode(root, ray, maxDistance: nearest ?? maxDistance);
+      if (hit != null && (nearest == null || hit.distance < nearest)) nearest = hit.distance;
+    }
+    return nearest;
+  }
+
+  /// Оружие пешком: перезарядка, прицеливание (камера за плечо, корпус к
+  /// прицелу) и выстрелы, пока зажата кнопка. За рулём не стреляем.
+  void _updateWeapon(double deltaSeconds, {required bool isDriving}) {
+    weapon.update(deltaSeconds);
+    _weaponEffects.update(deltaSeconds);
+    if (isDriving) {
+      inputState.consumeReload();
+      _aimHoldSeconds = 0.0;
+      cameraController.aiming = false;
+      _movement?.facingYawOverride = null;
+      return;
+    }
+
+    if (inputState.consumeReload()) weapon.startReload();
+    if (inputState.fireHeld) _aimHoldSeconds = _aimHoldAfterShot;
+    _aimHoldSeconds = math.max(0.0, _aimHoldSeconds - deltaSeconds);
+    final aiming = inputState.fireHeld || _aimHoldSeconds > 0.0;
+    cameraController.aiming = aiming;
+    _movement?.facingYawOverride = aiming ? cameraController.yaw : null;
+    if (!inputState.fireHeld) return;
+
+    // Ствол — у правой руки на уровне плеча, по курсу камеры (корпус
+    // доворачивается к нему за доли секунды).
+    final forward = cameraController.forward;
+    final right = cameraController.right;
+    final muzzle = playerNode.globalTransform.getTranslation() + vm.Vector3(0, 1.35, 0) + forward * 0.5 + right * 0.3;
+    final shot = _shooting.tryFire(
+      eye: cameraController.eyePosition,
+      viewDirection: cameraController.viewDirection,
+      muzzle: muzzle,
+    );
+    if (shot == null) return;
+    _weaponEffects.showShot(shot);
+    wantedSystem.reportShooting(witnesses: shot.witnesses, wounded: shot.wounded, killed: shot.killed);
+  }
+
   /// Узел, за которым сейчас "следит" мир — игрок пешком или машина за
   /// рулём. Публичный, чтобы HUD мог показать координаты в debug-оверлее
   /// (см. GameView) без дублирования этой развилки по gameModeState.
@@ -704,6 +802,7 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
+    _updateWeapon(deltaSeconds, isDriving: isDriving);
     _updateWeather(deltaSeconds);
     signals.advance(deltaSeconds);
     _signalsView.update();

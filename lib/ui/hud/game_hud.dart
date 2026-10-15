@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart';
 
 import '../../core/game_mode.dart';
+import '../../core/input/input_state.dart';
 import '../../engine/debug/fps_overlay.dart';
 import '../../engine/debug/quality_debug_panel.dart';
 import '../../engine/game.dart';
@@ -11,9 +12,11 @@ import '../controls/driving_controls.dart';
 import '../controls/keyboard_controls.dart';
 import '../controls/vehicle_button.dart';
 import '../controls/virtual_joystick.dart';
+import '../controls/weapon_controls.dart';
 import 'arrest_banner.dart';
 import 'clock_hud.dart';
 import 'wanted_stars.dart';
+import 'weapon_hud.dart';
 
 /// Высота нижней полосы с джойстиком/кнопками — под ней CameraControls не
 /// перехватывает жесты, иначе drag по джойстику конкурировал бы за жест с
@@ -50,6 +53,9 @@ class _GameHudState extends State<GameHud> {
   /// через Ticker) этот путь явно дёргает setState — смена режима дискретна
   /// и происходит только по нажатию, лишний Ticker здесь не нужен.
   void _toggleVehicle() {
+    // Кнопка огня исчезает вместе с пешим набором кнопок — палец с неё
+    // уже не "отпустится", и после высадки стрельба шла бы сама.
+    inputState.fireHeld = false;
     setState(() => game.toggleVehicle());
   }
 
@@ -98,6 +104,7 @@ class _GameHudState extends State<GameHud> {
                   ),
                 ),
               ),
+              Positioned.fill(child: Crosshair(game: game)),
               if (isDriving)
                 DrivingControls(bottomPadding: controlsBottom)
               else ...[
@@ -115,6 +122,21 @@ class _GameHudState extends State<GameHud> {
                   right: 24,
                   bottom: bottomInset + (isPortrait ? 24 : 16),
                   child: const RunButton(),
+                ),
+                Positioned(
+                  right: 104,
+                  bottom: bottomInset + (isPortrait ? 44 : 30),
+                  child: const FireButton(),
+                ),
+                Positioned(
+                  right: 120,
+                  bottom: bottomInset + (isPortrait ? 136 : 120),
+                  child: const ReloadButton(),
+                ),
+                Positioned(
+                  right: 24,
+                  bottom: bottomInset + (isPortrait ? 170 : 150),
+                  child: AmmoCounter(game: game),
                 ),
               ],
               Positioned(

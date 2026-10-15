@@ -23,6 +23,7 @@ RoadGraph _lineGraph() {
 void main() {
   knockdownTests();
   panicTests();
+  shootingTests();
 
   test('buildPedestrianAdjacency строит связи в обе стороны', () {
     final adjacency = buildPedestrianAdjacency(_lineGraph());
@@ -151,5 +152,54 @@ void panicTests() {
     final before = pedestrian.position.x;
     _advance(pedestrian, graph, 1.0);
     expect(pedestrian.position.x - before, closeTo(1.3, 0.05));
+  });
+}
+
+void shootingTests() {
+  test('три пули пистолета в корпус убивают, мёртвый не ходит', () {
+    final graph = _lineGraph();
+    final adjacency = buildPedestrianAdjacency(graph);
+    final pedestrian = Pedestrian(position: vm.Vector3(5, 0, 0), currentNodeId: 'a', targetNodeId: 'b');
+    final shooter = vm.Vector3(5, 0, -10);
+    expect(pedestrian.takeDamage(34, shooter), isFalse);
+    expect(pedestrian.panicSeconds, greaterThan(0));
+    expect(pedestrian.takeDamage(34, shooter), isFalse);
+    expect(pedestrian.takeDamage(34, shooter), isTrue);
+    expect(pedestrian.isDead, isTrue);
+    expect(pedestrian.isShootable, isFalse);
+    expect(pedestrian.takeDamage(34, shooter), isFalse); // второй раз не умирает
+
+    final before = pedestrian.position.clone();
+    advancePedestrian(pedestrian, graph, adjacency, dt: 1.0, speed: 2.0, random: Random(0));
+    expect(pedestrian.position, before);
+    expect(pedestrian.deadSeconds, 1.0);
+
+    pedestrian.revive();
+    expect(pedestrian.isDead, isFalse);
+    expect(pedestrian.health, Pedestrian.maxHealth);
+  });
+
+  test('испуганный выстрелом разворачивается и бежит прочь от стрелка', () {
+    final graph = _lineGraph();
+    final adjacency = buildPedestrianAdjacency(graph);
+    // Идёт от a к b, а стреляют со стороны b — разворачивается к a.
+    final pedestrian = Pedestrian(position: vm.Vector3(5, 0, 0), currentNodeId: 'a', targetNodeId: 'b');
+    pedestrian.scare(vm.Vector3(15, 0, 0), graph);
+    expect(pedestrian.targetNodeId, 'a');
+    expect(pedestrian.panicSeconds, greaterThan(0));
+    advancePedestrian(pedestrian, graph, adjacency, dt: 0.5, speed: 1.3, random: Random(0));
+    expect(pedestrian.position.x, lessThan(5));
+  });
+
+  test('в панике на развилке выбирает соседа подальше от стрелка', () {
+    final graph = _lineGraph();
+    final adjacency = buildPedestrianAdjacency(graph);
+    // Бежит к развилке b со стороны a, стрелок у a — дальше бежать к c.
+    final pedestrian = Pedestrian(position: vm.Vector3(9.95, 0, 0), currentNodeId: 'a', targetNodeId: 'b');
+    pedestrian.scare(vm.Vector3(-5, 0, 0), graph);
+    for (var i = 0; i < 20; i++) {
+      advancePedestrian(pedestrian, graph, adjacency, dt: 0.05, speed: 1.3, random: Random(i));
+    }
+    expect(pedestrian.targetNodeId, 'c');
   });
 }

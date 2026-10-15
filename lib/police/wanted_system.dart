@@ -26,6 +26,18 @@ class WantedSystem {
     _secondsSinceOffense = 0.0;
   }
 
+  /// Стрельба (lib/weapons/): выстрел при свидетелях ([witnesses] > 0) —
+  /// как мелкое преступление, до одной звезды; каждое ранение — ещё
+  /// звезда, убийство — две (ранение плюс смерть).
+  void reportShooting({int witnesses = 0, int wounded = 0, int killed = 0}) {
+    if (wounded == 0 && killed == 0) {
+      if (witnesses > 0) reportMinorCrime();
+      return;
+    }
+    wantedState.stars += wounded + killed * 2;
+    _secondsSinceOffense = 0.0;
+  }
+
   void update(double dt, {int pedestrianHits = 0, bool isSpeeding = false}) {
     var offended = false;
 

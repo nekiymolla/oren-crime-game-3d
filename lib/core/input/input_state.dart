@@ -13,11 +13,25 @@ class InputState {
   /// игрока за один кадр (edge-triggered, а не удержание).
   bool jumpRequested = false;
 
+  /// Кнопка огня зажата — оружие стреляет с темпом из weapons.json.
+  bool fireHeld = false;
+
+  /// Перезарядка — как прыжок, одно нажатие (см. [consumeReload]).
+  bool reloadRequested = false;
+
   void setMove(double x, double y) {
     moveDirection = vm.Vector2(x, y);
   }
 
   void requestJump() => jumpRequested = true;
+
+  void requestReload() => reloadRequested = true;
+
+  bool consumeReload() {
+    final requested = reloadRequested;
+    reloadRequested = false;
+    return requested;
+  }
 
   bool consumeJump() {
     final requested = jumpRequested;

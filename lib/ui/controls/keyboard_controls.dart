@@ -7,7 +7,8 @@ import 'package:flutter/services.dart';
 import '../../core/input/input_state.dart';
 
 /// Клавиатурный ввод для десктоп-тестирования (WASD/стрелки — движение,
-/// Shift — бег, Space — прыжок, E — сесть/выйти из машины). Пишет в тот же
+/// Shift — бег, Space — прыжок, E — сесть/выйти из машины, F — огонь
+/// (удержание), R — перезарядка). Пишет в тот же
 /// [InputState], что и тач-джойстик/кнопки — не отдельный путь ввода, а ещё
 /// один источник для того же приёмника (см. InputState).
 ///
@@ -44,6 +45,7 @@ class _KeyboardControlsState extends State<KeyboardControls>
   // именно клавиатурой) — а дальше не трогаем InputState вообще.
   bool _wasMoving = false;
   bool _wasRunning = false;
+  bool _wasFiring = false;
 
   @override
   void initState() {
@@ -88,12 +90,22 @@ class _KeyboardControlsState extends State<KeyboardControls>
       inputState.isRunning = running;
     }
     _wasRunning = running;
+
+    final firing = pressed.contains(LogicalKeyboardKey.keyF);
+    if (firing || _wasFiring) {
+      inputState.fireHeld = firing;
+    }
+    _wasFiring = firing;
   }
 
   KeyEventResult _onKeyEvent(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     if (event.logicalKey == LogicalKeyboardKey.space) {
       inputState.requestJump();
+      return KeyEventResult.handled;
+    }
+    if (event.logicalKey == LogicalKeyboardKey.keyR) {
+      inputState.requestReload();
       return KeyEventResult.handled;
     }
     if (event.logicalKey == LogicalKeyboardKey.keyE) {

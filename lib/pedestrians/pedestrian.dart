@@ -45,9 +45,76 @@ class Pedestrian {
 
   bool get isKnockedDown => knockedDownSeconds > 0.0;
 
+  /// Здоровье 0..[maxHealth]. Пистолет (assets/data/weapons.json) снимает
+  /// треть за выстрел в корпус.
+  static const double maxHealth = 100.0;
+  double health = maxHealth;
+
+  /// Убит — лежит на месте, пока система не переселит его подальше от
+  /// игрока (см. PedestrianSystem).
+  bool isDead = false;
+
+  /// Сколько секунд лежит мёртвым — тело убирается, только когда давно
+  /// лежит и игрок далеко.
+  double deadSeconds = 0.0;
+
+  /// Можно ли попасть пулей: на ногах и жив. Лежачих пуля пока не
+  /// задевает — капсула лежит, а проверка попадания под стоящую.
+  bool get isShootable => !isDead && !isKnockedDown;
+
+  /// Пуля попала: урон [damage] со стороны [from]. Возвращает true, если
+  /// это убило. Раненый в панике бежит.
+  bool takeDamage(double damage, vm.Vector3 from) {
+    if (isDead) return false;
+    health -= damage;
+    if (health > 0.0) {
+      panicSeconds = math.max(panicSeconds, 10.0);
+      fleeFrom ??= from.clone();
+      return false;
+    }
+    health = 0.0;
+    isDead = true;
+    deadSeconds = 0.0;
+    panicSeconds = 0.0;
+    fleeFrom = null;
+    returnPoint = null;
+    // Падает навзничь от стрелка, без отлёта.
+    final away = vm.Vector3(position.x - from.x, 0, position.z - from.z);
+    if (away.length2 > 1e-6) yaw = math.atan2(away.x, away.z);
+    knockbackVelocity.setZero();
+    return true;
+  }
+
+  /// Вернуть к жизни при переселении (новый человек на месте старого).
+  void revive() {
+    health = maxHealth;
+    isDead = false;
+    deadSeconds = 0.0;
+  }
+
   /// Сколько ещё секунд бежит в панике (водитель угнанной машины) —
   /// скорость в [panicSpeedMultiplier] раз выше шага.
   double panicSeconds = 0.0;
+
+  /// От чего бежит в панике (стрелок) — на развилках графа выбирает
+  /// соседа подальше от этой точки. null — паника без направления.
+  vm.Vector3? fleeFrom;
+
+  /// Испугался выстрела в [from]: бежит [seconds] секунд прочь — по
+  /// текущему ребру в ту сторону, что дальше от [from].
+  void scare(vm.Vector3 from, RoadGraph graph, {double seconds = 10.0}) {
+    if (isDead) return;
+    panicSeconds = math.max(panicSeconds, seconds);
+    fleeFrom = from.clone();
+    final current = graph.nodes[currentNodeId];
+    final target = graph.nodes[targetNodeId];
+    if (current == null || target == null || returnPoint != null) return;
+    if ((current.toVector3() - from).length2 > (target.toVector3() - from).length2) {
+      final previousTarget = targetNodeId;
+      targetNodeId = currentNodeId;
+      currentNodeId = previousTarget;
+    }
+  }
 
   /// Удар машиной: отлетает от [impactFrom] (центр машины) со скоростью,
   /// растущей со скоростью машины [impactSpeed], и лежит [lieSeconds].
@@ -118,6 +185,11 @@ bool advancePedestrian(
   required double speed,
   required math.Random random,
 }) {
+  if (pedestrian.isDead) {
+    pedestrian.deadSeconds += dt;
+    return false;
+  }
+
   if (pedestrian.isKnockedDown) {
     pedestrian.knockedDownSeconds = math.max(0.0, pedestrian.knockedDownSeconds - dt);
     pedestrian.position += pedestrian.knockbackVelocity * dt;
@@ -128,6 +200,7 @@ bool advancePedestrian(
   if (pedestrian.panicSeconds > 0.0) {
     pedestrian.panicSeconds = math.max(0.0, pedestrian.panicSeconds - dt);
     speed *= panicSpeedMultiplier;
+    if (pedestrian.panicSeconds == 0.0) pedestrian.fleeFrom = null;
   }
 
   // Встал после удара — сначала обратно на ребро (см. Pedestrian.returnPoint).
@@ -162,7 +235,25 @@ bool advancePedestrian(
     final candidates = neighbors.where((id) => id != pedestrian.currentNodeId).toList();
     final pool = candidates.isNotEmpty ? candidates : neighbors;
     pedestrian.currentNodeId = arrivedNodeId;
-    pedestrian.targetNodeId = pool[random.nextInt(pool.length)];
+    final fleeFrom = pedestrian.fleeFrom;
+    if (fleeFrom != null) {
+      // В панике — к соседу, дальнему от стрелка (может быть и тот,
+      // откуда пришёл: бежать назад лучше, чем навстречу).
+      var best = neighbors.first;
+      var bestSq = -1.0;
+      for (final id in neighbors) {
+        final node = graph.nodes[id];
+        if (node == null) continue;
+        final distanceSq = (node.toVector3() - fleeFrom).length2;
+        if (distanceSq > bestSq) {
+          bestSq = distanceSq;
+          best = id;
+        }
+      }
+      pedestrian.targetNodeId = best;
+    } else {
+      pedestrian.targetNodeId = pool[random.nextInt(pool.length)];
+    }
     return true;
   }
 

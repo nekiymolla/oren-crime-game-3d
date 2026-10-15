@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   carjackTests();
+  shootingTests();
 
   setUp(() => wantedState.stars = 0);
 
@@ -64,5 +65,27 @@ void carjackTests() {
     wantedState.stars = 3;
     system.reportMinorCrime();
     expect(wantedState.stars, 3); // не понижает
+  });
+}
+
+void shootingTests() {
+  setUp(() => wantedState.stars = 0);
+
+  test('выстрел без свидетелей не преступление, при свидетелях — звезда', () {
+    final system = WantedSystem();
+    system.reportShooting();
+    expect(wantedState.stars, 0);
+    system.reportShooting(witnesses: 3);
+    expect(wantedState.stars, 1);
+    system.reportShooting(witnesses: 3);
+    expect(wantedState.stars, 1);
+  });
+
+  test('ранение — звезда, убийство — две', () {
+    final system = WantedSystem();
+    system.reportShooting(wounded: 1);
+    expect(wantedState.stars, 1);
+    system.reportShooting(killed: 1);
+    expect(wantedState.stars, 3);
   });
 }

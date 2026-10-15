@@ -1,0 +1,25 @@
+{
+  "comment": "Оружие (ТЗ, раздел 12). Числа подбираются на ощупь в игре правкой этого файла. Здоровье пешехода — 100 (lib/pedestrians/pedestrian.dart): пистолет убивает тремя выстрелами в корпус или одним в голову.",
+  "defaultWeapon": "pistol_makarov",
+  "weapons": [
+    {
+      "id": "pistol_makarov",
+      "displayName": "ПМ",
+      "class": "pistol",
+      "damage": 34.0,
+      "headshotMultiplier": 3.0,
+      "legMultiplier": 0.6,
+      "rangeMeters": 50.0,
+      "fireRate": 4.0,
+      "magazineSize": 8,
+      "startingReserveAmmo": 48,
+      "reloadSeconds": 1.4,
+      "spreadDegrees": 0.4,
+      "recoilDegrees": 0.5,
+      "recoilRecoveryDegreesPerSecond": 6.0,
+      "maxRecoilDegrees": 2.0,
+      "aimAssistDegrees": 7.0,
+      "pellets": 1
+    }
+  ]
+}
