@@ -176,7 +176,7 @@ class _GameHudState extends State<GameHud> {
                   ),
                 Positioned(
                   left: isPortrait ? 24 : padding.left + 12 + 150 + 12,
-                  top: padding.top + (isPortrait ? 44 : 14),
+                  top: padding.top + (isPortrait ? 52 : 14),
                   child: VehicleInteractButton(
                     game: game,
                     onToggle: _toggleVehicle,
@@ -184,12 +184,12 @@ class _GameHudState extends State<GameHud> {
                 ),
                 Positioned(
                   right: padding.right + 24,
-                  top: padding.top + (isPortrait ? 44 : 14),
+                  top: padding.top + (isPortrait ? 52 : 14),
                   child: const WantedStars(),
                 ),
                 Positioned(
                   right: padding.right + 24,
-                  top: padding.top + (isPortrait ? 72 : 42),
+                  top: padding.top + (isPortrait ? 80 : 42),
                   child: MoneyHud(wallet: game.wallet),
                 ),
                 // Часы — по центру: в портрете под компасом, в ландшафте
@@ -197,7 +197,7 @@ class _GameHudState extends State<GameHud> {
                 Positioned(
                   left: 0,
                   right: 0,
-                  top: padding.top + (isPortrait ? 40 : 8),
+                  top: padding.top + (isPortrait ? 50 : 8),
                   child: Center(
                     child: ClockHud(clock: game.clock, weather: game.weather),
                   ),
