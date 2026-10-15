@@ -16,9 +16,10 @@ void main() {
     final home = _fromAsset().single;
     expect(home.price, greaterThan(0));
     expect(home.ownedFromStart, isFalse);
-    // Здание занимает x -6..6, z -10..4 (по высотам чанков) — вход вне его.
+    // Здание в координатах игры занимает x -6..6, z -4..10 (по высотам
+    // чанков и лучом в игре) — вход вне его.
     final insideX = home.entryPoint.x > -6 && home.entryPoint.x < 6;
-    final insideZ = home.entryPoint.z > -10 && home.entryPoint.z < 4;
+    final insideZ = home.entryPoint.z > -4 && home.entryPoint.z < 10;
     expect(insideX && insideZ, isFalse);
   });
 

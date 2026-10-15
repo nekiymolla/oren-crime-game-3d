@@ -1,9 +1,9 @@
 {
   "image": "minimap.png",
   "minX": -800,
-  "minZ": -800,
+  "minZ": -600,
   "maxX": 800,
-  "maxZ": 600,
+  "maxZ": 800,
   "metersPerPixel": 2,
   "width": 800,
   "height": 700

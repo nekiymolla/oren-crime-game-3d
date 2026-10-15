@@ -27,11 +27,12 @@ double viewAngle(double dx, double dz, double yaw) {
 }
 
 /// Мировое направление по компасному азимуту [bearingDegrees] (0 — север,
-/// 90 — восток). Север — −Z, восток — +X (tools/osm_pipeline/
-/// calibration.json).
+/// 90 — восток). В координатах игры север — +Z, восток — +X
+/// (tools/osm_pipeline/calibration.json; в glTF север был −Z, движок
+/// переворачивает Z при загрузке).
 ({double x, double z}) bearingToWorld(double bearingDegrees) {
   final b = bearingDegrees * math.pi / 180;
-  return (x: math.sin(b), z: -math.cos(b));
+  return (x: math.sin(b), z: math.cos(b));
 }
 
 /// Сколько метров от игрока до края радара: на скорости карта

@@ -25,10 +25,10 @@ void main() {
     expect(viewAngle(-5, 0, 0), closeTo(-math.pi / 2, 1e-9));
   });
 
-  test('азимуты: север −Z, восток +X', () {
+  test('азимуты в координатах игры: север +Z, восток +X', () {
     final north = bearingToWorld(0);
     expect(north.x, closeTo(0, 1e-9));
-    expect(north.z, closeTo(-1, 1e-9));
+    expect(north.z, closeTo(1, 1e-9));
     final east = bearingToWorld(90);
     expect(east.x, closeTo(1, 1e-9));
     expect(east.z, closeTo(0, 1e-9));

@@ -93,13 +93,17 @@ for (const [key, entries] of cellMap.entries()) {
   const fileName = `district_${key}.glb`;
   await io.write(path.join(outDir, fileName), cellDoc);
 
+  // Манифест — в координатах игры: движок при загрузке .glb переворачивает
+  // Z (z_игры = −z_glTF), а стример чанков сравнивает ячейки с позицией
+  // игрока в игре. Ячейка glTF [cz*S, (cz+1)*S) в игре — [−(cz+1)*S, −cz*S),
+  // т.е. номер −cz−1. Имена файлов остаются по glTF-ячейке.
   manifestCells.push({
     id: key,
     file: fileName,
     cellX: cx,
-    cellZ: cz,
+    cellZ: -cz - 1,
     centerX: (Math.min(...xs) + Math.max(...xs)) / 2,
-    centerZ: (Math.min(...zs) + Math.max(...zs)) / 2,
+    centerZ: -(Math.min(...zs) + Math.max(...zs)) / 2,
     nodeCount: entries.length,
   });
 

@@ -77,16 +77,21 @@ if (missing.length > 0) {
 const origin = found.origin;
 console.log(`Якорь найден на (${origin.x.toFixed(2)}, ${origin.z.toFixed(2)}) — сдвигаю геометрию.`);
 
-// Единичные векторы "метр на север" / "метр на восток" в локальных
-// координатах — эмпирически, без предположений о формуле проекции внутри
-// osm2world (см. заголовок файла).
+// Единичные векторы "метр на север" / "метр на восток" — эмпирически, без
+// предположений о формуле проекции внутри osm2world (см. заголовок файла).
+//
+// Пишутся в КООРДИНАТАХ ИГРЫ, а не glTF: движок (левосторонний) при
+// загрузке .glb переворачивает Z (z_игры = −z_glTF), так что граф, неон и
+// прочие данные, посчитанные в координатах glTF, ложились в игре зеркально
+// относительно геометрии (найдено 15.10.2026: граф проходил сквозь дома
+// в 147 точках из 1357, с переворотом — ни в одной; см. BUGS.md).
 const eastUnit = {
   x: (found.east.x - origin.x) / ANCHOR_OFFSET_METERS,
-  z: (found.east.z - origin.z) / ANCHOR_OFFSET_METERS,
+  z: -(found.east.z - origin.z) / ANCHOR_OFFSET_METERS,
 };
 const northUnit = {
   x: (found.north.x - origin.x) / ANCHOR_OFFSET_METERS,
-  z: (found.north.z - origin.z) / ANCHOR_OFFSET_METERS,
+  z: -(found.north.z - origin.z) / ANCHOR_OFFSET_METERS,
 };
 
 fs.writeFileSync(
