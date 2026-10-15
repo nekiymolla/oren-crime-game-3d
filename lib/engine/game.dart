@@ -46,6 +46,7 @@ import '../weapons/player_shooting.dart';
 import '../weapons/weapon_config.dart';
 import '../weapons/weapon_effects_view.dart';
 import '../weapons/weapon_state.dart';
+import '../world/building_facades.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
 import '../world/nav_grid.dart';
@@ -124,6 +125,9 @@ class Game {
   final WeatherSystem weather = WeatherSystem(initial: WeatherKind.clear);
   late final WeatherView _weatherView;
   late final WetRoadsView _wetRoads;
+
+  /// Окна на стенах домов (lib/world/building_facades.dart).
+  final BuildingFacades _facades = BuildingFacades();
 
   /// Неоновые вывески на фасадах вдоль крупных улиц (lib/world/neon_signs.dart).
   NeonSignsView? _neon;
@@ -292,7 +296,10 @@ class Game {
       sunLight: _sunLight!,
       sky: _sky!,
       shadowsAllowed: () => quality.shadowsEnabled,
-      onNightFactor: setHeadlightsGlow,
+      onNightFactor: (night) {
+        setHeadlightsGlow(night);
+        _facades.night = night;
+      },
       unlitSurfaces: [ground.mesh!.primitives.first.material as UnlitMaterial],
     );
     _weatherView = WeatherView(
@@ -372,6 +379,7 @@ class Game {
       radiusCells: worldConfig.streamingRadiusChunks,
       vegetation: vegetation,
       onChunkLoaded: (chunk) {
+        _facades.registerChunk(chunk);
         dayNight.registerChunk(chunk);
         _wetRoads.registerChunk(chunk);
       },
@@ -1079,6 +1087,7 @@ class Game {
     );
     _vegetation?.setSnowCover(params.snowCover);
     _wetRoads.update(params.wetness);
+    _facades.wetness = params.wetness;
     final lighting = dayNight.lighting!;
     _neon?.update(deltaSeconds, nightFactor: lighting.nightFactor, goldenHour: lighting.goldenHour);
   }

@@ -1,0 +1,111 @@
+// Фасад здания: исходная текстура стены из osm2world (штукатурка/бетон) и
+// цвет дома + процедурные окна поверх, по мировым координатам: этажи по
+// 3 м, простенки по ~2.7 м, на первом этаже — витрины. Окна — тёмное
+// гладкое стекло (отражает небо), с рамой и подоконником. Ночью часть окон
+// горит тёплым светом (у каждого окна свой случайный оттенок и яркость),
+// доля горящих — night_lit_fraction. Окна только на вертикальных гранях —
+// крыши и горизонтальные поверхности остаются как были.
+//
+// Параметры ставит lib/world/building_facades.dart.
+material {
+  name: "BuildingFacade",
+  shading_model: lit,
+  parameters: [
+    { type: vec4, name: tint, default: [1, 1, 1, 1] },
+    { type: float, name: night, default: 0 },
+    { type: float, name: night_lit_fraction, default: 0.42 },
+    { type: float, name: wetness, default: 0 },
+    { type: sampler2d, name: wall_texture, hint: default_white },
+  ],
+}
+
+fragment {
+  float Hash12(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+  }
+
+  // 1 внутри прямоугольника [lo, hi] (в метрах), сглаженно по ширине
+  // пикселя — без лесенки вдали.
+  float Box(vec2 p, vec2 lo, vec2 hi, vec2 aa) {
+    vec2 a = smoothstep(lo - aa, lo + aa, p);
+    vec2 b = 1.0 - smoothstep(hi - aa, hi + aa, p);
+    return a.x * a.y * b.x * b.y;
+  }
+
+  void Surface(inout MaterialInputs material) {
+    vec3 wall = SRGBToLinear(texture(wall_texture, GetUV0()).rgb) * material_params.tint.rgb;
+    material.base_color = vec4(wall, 1.0);
+    material.roughness = mix(0.92, 0.35, material_params.wetness);
+    material.metallic = 0.0;
+
+    vec3 n = GetWorldNormal();
+    if (abs(n.y) > 0.35) return;
+
+    vec3 p = GetWorldPosition();
+    // Координата вдоль стены и высота.
+    vec2 t = normalize(vec2(-n.z, n.x));
+    float u = dot(p.xz, t);
+    float v = p.y;
+
+    // Стиль квартала: шаг окон и их ширина — общие на ~60 м вокруг, чтобы
+    // соседние стены одного дома совпадали.
+    float district = Hash12(floor(p.xz / 60.0) + 17.0);
+    float floorHeight = 3.0;
+    float bayWidth = mix(2.4, 3.3, district);
+    float floorIndex = floor(v / floorHeight);
+    float bayIndex = floor(u / bayWidth);
+    vec2 local = vec2(u - bayIndex * bayWidth, v - floorIndex * floorHeight);
+    // Ширина сглаживания — от непрерывных координат: у local на границе
+    // пролёта скачок, и fwidth(local) там рисовал бы светлые чёрточки.
+    vec2 aa = max(fwidth(vec2(u, v)), vec2(0.004)) * 0.75;
+
+    bool ground = floorIndex < 1.0;
+    float windowWidth = ground ? bayWidth * 0.82 : mix(1.0, 1.5, Hash12(vec2(district, 3.1)));
+    float windowBottom = ground ? 0.45 : 0.9;
+    float windowTop = ground ? 2.55 : 2.35;
+    float x0 = (bayWidth - windowWidth) * 0.5;
+    vec2 lo = vec2(x0, windowBottom);
+    vec2 hi = vec2(x0 + windowWidth, windowTop);
+
+    float frame = Box(local, lo - 0.07, hi + 0.07, aa);
+    float glass = Box(local, lo, hi, aa);
+    // Импост посередине (у жилых окон) — две створки.
+    if (!ground) {
+      float mid = (lo.x + hi.x) * 0.5;
+      glass *= 1.0 - Box(local, vec2(mid - 0.035, lo.y), vec2(mid + 0.035, hi.y), aa);
+    }
+    // Подоконник — светлая полоска под окном.
+    float sill = Box(local, vec2(lo.x - 0.1, lo.y - 0.12), vec2(hi.x + 0.1, lo.y - 0.04), aa);
+
+    vec3 frameColor = vec3(0.78, 0.78, 0.76);
+    vec3 sillColor = vec3(0.6, 0.6, 0.58);
+    // Номер окна: пролёт, этаж и сама стена (её плоскость и направление
+    // округлены — иначе дрожание float от пикселя к пикселю даёт шум).
+    float wallId = floor(dot(p.xz, n.xz) * 0.5 + 0.5) + floor(atan(n.z, n.x) * 4.0 + 0.5) * 131.0;
+    float cell = Hash12(vec2(bayIndex + wallId * 0.618, floorIndex + wallId * 0.137));
+    // Стекло: тёмное, чуть разного тона за стеклом (шторы, комнаты).
+    vec3 glassColor = mix(vec3(0.025, 0.03, 0.04), vec3(0.06, 0.05, 0.04), cell);
+
+    vec3 color = wall;
+    color = mix(color, sillColor, sill);
+    color = mix(color, frameColor, frame);
+    color = mix(color, glassColor, glass);
+    material.base_color = vec4(color, 1.0);
+    material.roughness = mix(material.roughness, 0.06, glass);
+    // Окно утоплено в стену — рама и откосы чуть темнее по краю.
+    material.occlusion = 1.0 - 0.35 * (frame - glass);
+
+    // Ночью горит часть окон: тёплые лампы, изредка холодный свет экрана.
+    float lit = step(1.0 - material_params.night_lit_fraction, Hash12(vec2(cell * 91.7, floorIndex + 7.0)));
+    if (ground) lit = max(lit, step(0.6, cell)); // витрины горят чаще
+    vec3 warm = mix(vec3(1.0, 0.62, 0.3), vec3(1.0, 0.82, 0.55), Hash12(vec2(cell, 5.0)));
+    vec3 cool = vec3(0.55, 0.7, 1.0);
+    vec3 lamp = Hash12(vec2(cell, 9.0)) > 0.88 ? cool : warm;
+    float brightness = ground ? 1.4 : mix(0.5, 1.6, Hash12(vec2(cell, 13.0)));
+    // Свет из глубины комнаты — ярче к низу окна.
+    float depthFade = mix(1.0, 0.65, clamp((local.y - lo.y) / (hi.y - lo.y), 0.0, 1.0));
+    material.emissive = lamp * brightness * depthFade * lit * glass * material_params.night;
+  }
+}
