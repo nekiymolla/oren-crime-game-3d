@@ -1,19 +1,20 @@
 {
+  "comment": "Недвижимость (ТЗ, раздел 18). Координаты — мировые метры игры. positionLocal дома Весенняя, 3 — точка адреса внутри здания (крыша 7.5 м); вход — у восточного фасада лицом к дороге, найден по высотам геометрии чанков (дом занимает x -6..6, z -10..4). Интерьеров и гаража пока нет — поля оставлены под них.",
   "properties": [
     {
       "id": "home_player_01",
-      "displayName": "Дом игрока — ул. Весенняя, 3",
+      "displayName": "Дом на Весенней, 3",
       "geoLocation": {
         "latitude": 51.715510,
         "longitude": 55.107186
       },
       "positionLocal": [0.0, 0.0, 0.0],
-      "price": 0.0,
-      "owned": true,
+      "price": 1500,
+      "owned": false,
       "hasGarage": true,
       "garageCapacity": 1,
-      "entryPointLocal": [2.0, 0.0, 1.5],
-      "exitPointLocal": [2.0, 0.0, 3.0],
+      "entryPointLocal": [8.5, 0.0, -2.0],
+      "exitPointLocal": [9.5, 0.0, -2.0],
       "interiorSceneId": "interior_home_player_01",
       "isSaveSpot": true
     }

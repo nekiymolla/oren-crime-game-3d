@@ -10,6 +10,7 @@ import '../../engine/game.dart';
 import '../../engine/game_view.dart';
 import '../controls/driving_controls.dart';
 import '../controls/keyboard_controls.dart';
+import '../controls/property_button.dart';
 import '../controls/vehicle_button.dart';
 import '../controls/virtual_joystick.dart';
 import '../controls/weapon_controls.dart';
@@ -183,6 +184,13 @@ class _GameHudState extends State<GameHud> {
                   right: 24,
                   top: MediaQuery.of(context).padding.top + 56,
                   child: MoneyHud(wallet: game.wallet),
+                ),
+                // Кнопка дома — по центру над полосой управления, у маркера.
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: _controlsStripHeight + MediaQuery.of(context).padding.bottom + 12,
+                  child: Center(child: PropertyButton(game: game)),
                 ),
                 const ArrestBanner(),
                 const DeathBanner(),

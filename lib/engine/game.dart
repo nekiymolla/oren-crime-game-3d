@@ -17,6 +17,8 @@ import '../player/player_health.dart';
 import '../player/player_input_bridge_component.dart';
 import '../player/death_state.dart';
 import '../police/arrest_state.dart';
+import '../properties/property.dart';
+import '../properties/property_markers_view.dart';
 import '../police/police_officer.dart';
 import '../police/police_system.dart';
 import '../time/day_night.dart';
@@ -188,6 +190,10 @@ class Game {
   late final PickupField _pickups;
   late final PickupsView _pickupsView;
   final math.Random _random = math.Random();
+
+  /// Недвижимость (lib/properties/): что куплено, где возрождаться.
+  late final PropertySystem properties;
+  late final PropertyMarkersView _propertyMarkers;
 
   /// С запасом покрывает весь загружаемый чанками район (~1900x1600 м, см.
   /// PROGRESS.md) — плоскость всего 2 треугольника, размер почти бесплатен,
@@ -405,6 +411,10 @@ class Game {
     _pickups = PickupField(lifetimeSeconds: _economy.pickupLifetimeSeconds, collectRadius: _economy.pickupRadius);
     _pickupsView = PickupsView(_pickups);
     scene.add(_pickupsView.buildNode());
+
+    properties = PropertySystem(await loadProperties());
+    _propertyMarkers = PropertyMarkersView(properties);
+    scene.add(_propertyMarkers.buildNode());
 
     final weapons = await loadWeaponCatalog();
     weapon = WeaponState(weapons.defaultWeapon);
@@ -821,6 +831,7 @@ class Game {
       weapon.reserveAmmo += item.ammo;
     }
     _pickupsView.update(deltaSeconds);
+    _propertyMarkers.update(deltaSeconds);
   }
 
   /// Узел, за которым сейчас "следит" мир — игрок пешком или машина за
@@ -1002,8 +1013,26 @@ class Game {
     wantedState.stars = 0;
     policeSystem.clearUnits();
     _setPlayerLying(false);
-    _movement?.teleport(worldConfig.playerSpawnPosition);
+    _movement?.teleport(_respawnPosition);
     cameraController.followTarget = playerNode;
+  }
+
+  /// Где появляется игрок после смерти и ареста: у своего дома, если он
+  /// куплен, иначе на точке спавна.
+  vm.Vector3 get _respawnPosition => properties.respawnPoint() ?? worldConfig.playerSpawnPosition;
+
+  /// Что можно сделать у входа в дом прямо сейчас (для кнопки в HUD):
+  /// только пешком и живым.
+  PropertyInteraction? get propertyInteraction {
+    if (isDead || gameModeState.mode != ControlMode.onFoot) return null;
+    return properties.interactionAt(playerNode.globalTransform.getTranslation(), wallet);
+  }
+
+  /// Купить дом, у входа в который стоит игрок. true — куплен.
+  bool buyNearbyProperty() {
+    final interaction = propertyInteraction;
+    if (interaction == null || interaction.owned) return false;
+    return properties.buy(interaction.property, wallet);
   }
 
   /// Капсула игрока лежит на земле (убит) или стоит.
@@ -1026,7 +1055,7 @@ class Game {
     policeSystem.clearUnits();
     arrestState.trigger();
     if (gameModeState.mode == ControlMode.driving) toggleVehicle();
-    playerNode.position = worldConfig.playerSpawnPosition;
+    playerNode.position = _respawnPosition;
     cameraController.followTarget = playerNode;
   }
 
