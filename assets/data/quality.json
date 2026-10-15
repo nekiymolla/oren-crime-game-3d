@@ -16,6 +16,7 @@
       "pedestrianPopulation": 8,
       "trafficPopulation": 4,
       "godRaysEnabled": false,
+      "wetReflectionsEnabled": false,
       "precipitationParticles": 300,
       "maxTrees": 80
     },
@@ -32,6 +33,7 @@
       "pedestrianPopulation": 12,
       "trafficPopulation": 6,
       "godRaysEnabled": true,
+      "wetReflectionsEnabled": false,
       "precipitationParticles": 600,
       "maxTrees": 150
     },
@@ -49,6 +51,7 @@
       "pedestrianPopulation": 16,
       "trafficPopulation": 10,
       "godRaysEnabled": true,
+      "wetReflectionsEnabled": false,
       "precipitationParticles": 1200,
       "maxTrees": 220
     }

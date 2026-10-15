@@ -43,6 +43,7 @@ class WeatherParams {
     this.contrast = 0.0,
     this.temperature = 0.0,
     this.snowCover = 0.0,
+    this.wetness = 0.0,
   });
 
   /// 0 — чистое небо, 1 — сплошная облачность: гасит солнце, тени и лучи,
@@ -78,6 +79,15 @@ class WeatherParams {
   /// К чему стремится снежный покров на земле и кронах (0..1).
   final double snowCover;
 
+  /// Насколько мокрый асфальт (0..1): копится в дождь и сохнет после
+  /// своим темпом (WeatherSystem). В пресетах не задаётся — считается из
+  /// силы дождя ([wetnessForRain]).
+  final double wetness;
+
+  /// К какой мокроте стремится асфальт при такой силе дождя: слабый
+  /// дождь мочит не до конца, обычный и сильнее — полностью.
+  static double wetnessForRain(double rain) => rain > 0.05 ? math.min(1.0, rain / 0.5) : 0.0;
+
   static WeatherParams lerp(WeatherParams a, WeatherParams b, double t) {
     double mix(double x, double y) => x + (y - x) * t;
     return WeatherParams(
@@ -93,6 +103,7 @@ class WeatherParams {
       contrast: mix(a.contrast, b.contrast),
       temperature: mix(a.temperature, b.temperature),
       snowCover: mix(a.snowCover, b.snowCover),
+      wetness: mix(a.wetness, b.wetness),
     );
   }
 }
@@ -223,6 +234,7 @@ class WeatherSystem {
   double _progress = 1.0;
   double _hoursUntilChange = 3.0;
   double _snowCover = 0.0;
+  double _wetness = 0.0;
 
   /// Куда идёт погода (после перехода — текущая).
   WeatherKind get kind => _to;
@@ -231,7 +243,8 @@ class WeatherSystem {
   WeatherParams get params {
     final t = _progress * _progress * (3 - 2 * _progress); // smoothstep
     final blended = WeatherParams.lerp(_fromParams, weatherPresets[_to]!, t);
-    // Снег на земле копится и тает своим темпом, а не вместе с переходом.
+    // Снег и мокрый асфальт копятся и сходят своим темпом, а не вместе с
+    // переходом.
     return WeatherParams(
       cloudCover: blended.cloudCover,
       fogDensity: blended.fogDensity,
@@ -245,6 +258,7 @@ class WeatherSystem {
       contrast: blended.contrast,
       temperature: blended.temperature,
       snowCover: _snowCover,
+      wetness: _wetness,
     );
   }
 
@@ -269,6 +283,12 @@ class WeatherSystem {
     final target = params.snow > 0.05 ? weatherPresets[_to]!.snowCover : 0.0;
     final rate = target > _snowCover ? realSeconds / 90.0 : realSeconds / 240.0;
     _snowCover += (target - _snowCover).clamp(-rate, rate);
+
+    // Мокрый асфальт: намокает за ~40 секунд дождя, сохнет ~4 минуты —
+    // после дождя улицы ещё долго блестят.
+    final wetTarget = WeatherParams.wetnessForRain(params.rain);
+    final wetRate = wetTarget > _wetness ? realSeconds / 40.0 : realSeconds / 240.0;
+    _wetness += (wetTarget - _wetness).clamp(-wetRate, wetRate);
 
     _hoursUntilChange -= gameHoursPassed;
     if (_hoursUntilChange <= 0) {

@@ -39,6 +39,38 @@ void main() {
     expect(weather.params.snowCover, lessThan(0.05));
   });
 
+  test('асфальт намокает в дождь за десятки секунд и долго сохнет', () {
+    final weather = WeatherSystem(initial: WeatherKind.rain);
+    expect(weather.params.wetness, 0.0);
+    weather.update(10, gameHoursPassed: 0, dayOfYear: 287);
+    final early = weather.params.wetness;
+    expect(early, greaterThan(0.1));
+    expect(early, lessThan(0.5));
+    weather.update(40, gameHoursPassed: 0, dayOfYear: 287);
+    expect(weather.params.wetness, closeTo(1.0, 1e-9));
+
+    // Дождь кончился — через минуту ещё мокро, через 5 минут сухо.
+    weather.setWeather(WeatherKind.clear, immediately: true);
+    weather.update(60, gameHoursPassed: 0, dayOfYear: 287);
+    expect(weather.params.wetness, greaterThan(0.5));
+    for (var i = 0; i < 8; i++) {
+      weather.update(30, gameHoursPassed: 0, dayOfYear: 287);
+    }
+    expect(weather.params.wetness, 0.0);
+  });
+
+  test('слабый дождь мочит асфальт не до конца, снег не мочит', () {
+    final drizzle = WeatherSystem(initial: WeatherKind.drizzle);
+    final snow = WeatherSystem(initial: WeatherKind.snow);
+    for (var i = 0; i < 10; i++) {
+      drizzle.update(30, gameHoursPassed: 0, dayOfYear: 287);
+      snow.update(30, gameHoursPassed: 0, dayOfYear: 10);
+    }
+    expect(drizzle.params.wetness, greaterThan(0.4));
+    expect(drizzle.params.wetness, lessThan(0.9));
+    expect(snow.params.wetness, 0.0);
+  });
+
   test('в октябре жары не бывает, снег редкость; зимой снега много', () {
     final random = math.Random(1);
     var octoberHeat = 0, octoberSnow = 0, winterSnow = 0;

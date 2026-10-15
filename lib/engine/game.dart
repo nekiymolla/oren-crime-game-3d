@@ -16,6 +16,7 @@ import '../time/day_night_view.dart';
 import '../traffic/traffic_car.dart';
 import '../weather/weather.dart';
 import '../weather/weather_view.dart';
+import '../weather/wet_roads_view.dart';
 import '../traffic/traffic_signals.dart';
 import '../traffic/traffic_signals_view.dart';
 import '../traffic/traffic_system.dart';
@@ -99,6 +100,7 @@ class Game {
   /// — ясно, чтобы первым игрок увидел закат в духе Вайс-Сити.
   final WeatherSystem weather = WeatherSystem(initial: WeatherKind.clear);
   late final WeatherView _weatherView;
+  late final WetRoadsView _wetRoads;
 
   /// Неоновые вывески на фасадах вдоль крупных улиц (lib/world/neon_signs.dart).
   NeonSignsView? _neon;
@@ -209,8 +211,9 @@ class Game {
       maxParticles: quality.precipitationParticles,
     );
     scene.add(_weatherView.buildNode());
+    _wetRoads = WetRoadsView(scene: scene, reflectionsAllowed: () => quality.wetReflectionsEnabled);
     dayNight.visibleSky = shaderSky;
-    await _buildNeon();
+    if (neonSignsEnabled) await _buildNeon();
     // Сразу выставить небо/свет на стартовое время — иначе первый кадр был
     // бы дневным статичным.
     dayNight.update(0, weather: weather.params);
@@ -265,7 +268,10 @@ class Game {
       manifest: districtManifest,
       radiusCells: worldConfig.streamingRadiusChunks,
       vegetation: vegetation,
-      onChunkLoaded: dayNight.registerChunk,
+      onChunkLoaded: (chunk) {
+        dayNight.registerChunk(chunk);
+        _wetRoads.registerChunk(chunk);
+      },
     );
     // Грузим чанки вокруг реальной точки спавна СИНХРОННО с load() (await,
     // не fire-and-forget) — GameView/тики стартуют только после того, как
@@ -527,6 +533,11 @@ class Game {
     return sunNode;
   }
 
+  /// Неоновые вывески отложены до этапа детализации (решение 15.10.2026:
+  /// сейчас важнее геймплей MVP). Код, данные и шейдер на месте —
+  /// вернуть можно, поставив true.
+  static const bool neonSignsEnabled = false;
+
   /// Неон — вывески из assets/data/neon_signs.json и мягкие пятна света от
   /// них (шейдер neon_glow.fmat). Не загрузился шейдер — вывески без пятен.
   Future<void> _buildNeon() async {
@@ -729,6 +740,7 @@ class Game {
       dayOfYear: clock.dayOfYear,
     );
     _vegetation?.setSnowCover(params.snowCover);
+    _wetRoads.update(params.wetness);
     final lighting = dayNight.lighting!;
     _neon?.update(deltaSeconds, nightFactor: lighting.nightFactor, goldenHour: lighting.goldenHour);
   }

@@ -29,6 +29,7 @@ class QualitySettings {
     this.trafficPopulation = 8,
     required this.maxTrees,
     this.godRaysEnabled = true,
+    this.wetReflectionsEnabled = false,
     this.precipitationParticles = 800,
   });
 
@@ -49,6 +50,7 @@ class QualitySettings {
     // Необязательное: конфиги до появления трафика читаются как 8.
     trafficPopulation: json['trafficPopulation'] as int? ?? 8,
     godRaysEnabled: json['godRaysEnabled'] as bool? ?? true,
+    wetReflectionsEnabled: json['wetReflectionsEnabled'] as bool? ?? false,
     precipitationParticles: json['precipitationParticles'] as int? ?? 800,
     maxTrees: json['maxTrees'] as int,
   );
@@ -85,6 +87,11 @@ class QualitySettings {
   /// переключение пресета действует сразу.
   final bool godRaysEnabled;
 
+  /// Экранные отражения (SSR) на мокром асфальте — второй по цене экранный
+  /// проход после лучей. Без них асфальт в дождь всё равно темнеет и
+  /// бликует от неба, но неон в нём не отражается. Читается каждый кадр.
+  final bool wetReflectionsEnabled;
+
   /// Сколько капель/снежинок вокруг камеры при максимальных осадках —
   /// каждая пересчитывается каждый кадр. Мировая настройка (в load()).
   final int precipitationParticles;
@@ -114,6 +121,7 @@ class QualitySettings {
     trafficPopulation: trafficPopulation,
     maxTrees: maxTrees,
     godRaysEnabled: godRaysEnabled,
+    wetReflectionsEnabled: wetReflectionsEnabled,
     precipitationParticles: precipitationParticles,
   );
 
