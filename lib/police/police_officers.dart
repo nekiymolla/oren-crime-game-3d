@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../characters/character_animation.dart';
+import '../characters/character_library.dart';
+import '../characters/character_model.dart';
 import '../weapons/ballistics.dart';
 import '../weapons/player_shooting.dart';
 import 'police_officer.dart';
@@ -20,11 +23,11 @@ class OfficerShot {
 /// идут к игроку при прямой видимости и стреляют. В них можно попасть —
 /// это цели для пуль игрока, как пешеходы ([ShootTargets]).
 ///
-/// Рендер — один InstancedMesh на фиксированный пул из [poolSize] мест
-/// (тёмно-синие капсулы): свободные места спрятаны под землю, на
-/// развёртывание ничего не создаётся.
+/// Рендер — фиксированный пул из [poolSize] мест: анимированные модели из
+/// [characters] (свободные спрятаны), без библиотеки (тесты) — тёмно-синие
+/// капсулы одним InstancedMesh. На развёртывание ничего не создаётся.
 class PoliceOfficers implements ShootTargets {
-  PoliceOfficers({math.Random? random})
+  PoliceOfficers({math.Random? random, CharacterLibrary? characters})
     : _random = random ?? math.Random(),
       bodies = InstancedMesh(
         geometry: CapsuleGeometry(radius: _radius, height: _bodyHeight),
@@ -33,9 +36,20 @@ class PoliceOfficers implements ShootTargets {
           ..roughnessFactor = 0.7,
       ) {
     for (var i = 0; i < poolSize; i++) {
-      bodies.addInstance(_hidden, color: vm.Vector4(0.08, 0.12, 0.32, 1.0));
+      if (characters == null) {
+        bodies.addInstance(_hidden, color: vm.Vector4(0.08, 0.12, 0.32, 1.0));
+      } else {
+        final model = characters.createOfficer(_random)..visible = false;
+        _models.add(model);
+        _root.add(model.node);
+      }
     }
   }
+
+  /// Модели мест пула (пусто без библиотеки персонажей).
+  final List<CharacterModel> _models = [];
+  final List<vm.Vector3> _lastPositions = List.generate(poolSize, (_) => vm.Vector3.zero());
+  final Node _root = Node();
 
   static const int poolSize = 6;
   static const int officersPerCar = 2;
@@ -55,7 +69,10 @@ class PoliceOfficers implements ShootTargets {
   final InstancedMesh bodies;
   final List<PoliceOfficer?> _slots = List.filled(poolSize, null);
 
-  Node buildNode() => Node()..addComponent(InstancedMeshComponent(bodies));
+  Node buildNode() {
+    if (_models.isEmpty) _root.addComponent(InstancedMeshComponent(bodies));
+    return _root;
+  }
 
   Iterable<PoliceOfficer> get _active => _slots.whereType<PoliceOfficer>();
 
@@ -83,7 +100,8 @@ class PoliceOfficers implements ShootTargets {
       if (slot == null) break;
       final officer = PoliceOfficer(position: carPosition + right * (1.6 * side), unitId: unitId, yaw: carHeading);
       _slots[slot] = officer;
-      bodies.setInstanceTransform(slot, _transform(officer));
+      _lastPositions[slot].setFrom(officer.position);
+      _show(slot, officer);
       deployed++;
     }
     return deployed;
@@ -123,13 +141,19 @@ class PoliceOfficers implements ShootTargets {
         officer.deadSeconds += dt;
         if (officer.deadSeconds > _bodyCleanupSeconds && (officer.position - player).length > _bodyCleanupDistance) {
           _free(i);
+        } else if (_models.isNotEmpty) {
+          _animate(i, officer, dt, sees: false, fired: false);
         }
         continue;
       }
       final eye = officer.position + vm.Vector3(0, 1.4, 0);
       final sees = lineOfSight(eye, chest);
       final fires = stepOfficer(officer, player, dt, hasLineOfSight: sees, random: _random, pathClear: pathClear);
-      bodies.setInstanceTransform(i, _transform(officer));
+      if (_models.isEmpty) {
+        bodies.setInstanceTransform(i, _transform(officer));
+      } else {
+        _animate(i, officer, dt, sees: sees, fired: fires);
+      }
       if (!fires) continue;
 
       final muzzle = officer.position + vm.Vector3(0, 1.3, 0) + vm.Vector3(math.sin(officer.yaw), 0, math.cos(officer.yaw)) * 0.45;
@@ -163,7 +187,11 @@ class PoliceOfficers implements ShootTargets {
     final officer = _slots[index];
     if (officer == null) return false;
     final killed = officer.takeDamage(damage, from);
-    bodies.setInstanceTransform(index, _transform(officer));
+    if (_models.isEmpty) {
+      bodies.setInstanceTransform(index, _transform(officer));
+    } else if (!killed) {
+      _models[index].play(CharacterAnim.hit, fadeSeconds: 0.08, restart: true);
+    }
     return killed;
   }
 
@@ -197,7 +225,46 @@ class PoliceOfficers implements ShootTargets {
 
   void _free(int slot) {
     _slots[slot] = null;
-    bodies.setInstanceTransform(slot, _hidden);
+    if (_models.isEmpty) {
+      bodies.setInstanceTransform(slot, _hidden);
+    } else {
+      _models[slot].visible = false;
+    }
+  }
+
+  void _show(int slot, PoliceOfficer officer) {
+    if (_models.isEmpty) {
+      bodies.setInstanceTransform(slot, _transform(officer));
+      return;
+    }
+    final model = _models[slot]
+      ..visible = true
+      ..play(CharacterAnim.run, fadeSeconds: 0);
+    model.node.position = officer.position;
+    model.node.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), officer.yaw);
+  }
+
+  /// Клип офицера: убит — лежит, бежит — бег, стоит и видит игрока —
+  /// целится (выстрел — отдача), иначе стоит.
+  void _animate(int slot, PoliceOfficer officer, double dt, {required bool sees, required bool fired}) {
+    final model = _models[slot];
+    final last = _lastPositions[slot];
+    final dx = officer.position.x - last.x;
+    final dz = officer.position.z - last.z;
+    last.setFrom(officer.position);
+    model.node.position = officer.position;
+    model.node.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), officer.yaw);
+    final speed = officer.isDead || dt <= 0 ? 0.0 : math.sqrt(dx * dx + dz * dz) / dt;
+    final reacting = (model.current == CharacterAnim.hit || model.current == CharacterAnim.shoot) &&
+        !model.currentFinished &&
+        !officer.isDead;
+    if (fired && speed < 0.5) {
+      model.play(CharacterAnim.shoot, fadeSeconds: 0.05, restart: true);
+    } else if (!reacting) {
+      final choice = locomotionAnim(speed: speed, lying: officer.isDead, aiming: sees);
+      model.play(choice.anim, rate: choice.rate, fadeSeconds: officer.isDead ? 0.12 : 0.2);
+    }
+    model.update(dt);
   }
 
   vm.Matrix4 _transform(PoliceOfficer officer) {

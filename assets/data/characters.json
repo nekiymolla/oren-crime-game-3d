@@ -1,0 +1,23 @@
+{
+  "comment": "Модели персонажей (assets/models/characters, готовятся tools/assets/prepare_characters.mjs из паков Quaternius, CC0 — см. assets/models/CREDITS.md). У всех один скелет; анимации лежат только в носителях своего пола (animationCarriers), остальные модели берут клипы оттуда — клипы flutter_scene привязываются к костям по имени.",
+  "animationCarriers": {
+    "male": "male_casual",
+    "female": "female_casual"
+  },
+  "player": "male_hoodie",
+  "police": ["male_swat", "female_soldier"],
+  "civilians": [
+    "male_casual",
+    "male_business",
+    "male_punk",
+    "male_worker",
+    "male_farmer",
+    "male_adventurer",
+    "female_casual",
+    "female_casual2",
+    "female_adventurer",
+    "female_punk",
+    "female_suit",
+    "female_worker"
+  ]
+}

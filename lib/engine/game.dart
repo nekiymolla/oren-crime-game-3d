@@ -4,6 +4,9 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../audio/audio_system.dart';
+import '../characters/character_animation.dart';
+import '../characters/character_library.dart';
+import '../characters/character_model.dart';
 import '../core/game_mode.dart';
 import '../core/input/input_state.dart';
 import '../economy/pickups.dart';
@@ -147,6 +150,16 @@ class Game {
 
   Node? _playerMeshNode;
 
+  /// Модели людей (assets/data/characters.json); null — не загрузились,
+  /// тогда все остаются капсулами.
+  CharacterLibrary? _characters;
+
+  /// Модель игрока (null — капсула).
+  CharacterModel? _playerModel;
+
+  /// В этом кадре был выстрел — модель игрока дёргает отдачей.
+  bool _firedThisFrame = false;
+
   /// Отладочный слой дорожного графа (только при [debugShowRoadGraph]).
   Node? _roadGraphDebugNode;
 
@@ -193,7 +206,6 @@ class Game {
   /// Недвижимость (lib/properties/): что куплено, где возрождаться.
   late final PropertySystem properties;
   late final PropertyMarkersView _propertyMarkers;
-  double _tmpT = 0; int _tmpPedsIn = 0, _tmpCarsIn = 0, _tmpSamples = 0; // TMP_NAV
 
   /// Звук (lib/audio/).
   late final AudioSystem audio;
@@ -242,6 +254,13 @@ class Game {
     // Раньше всего остального: пресет задаёт и параметры света/неба/камеры,
     // которые строятся ниже по этому же методу, и размер населения/деревьев.
     qualityPresets = await loadQualityPresets();
+    try {
+      _characters = await CharacterLibrary.load();
+    } catch (error) {
+      // Без моделей игра остаётся играбельной на капсулах.
+      // ignore: avoid_print
+      print('CharacterLibrary: модели людей не загрузились ($error) — капсулы');
+    }
     quality = qualityPresets.defaultPreset;
     scene.renderScale = quality.renderScale;
     scene.antiAliasingMode = quality.antiAliasing;
@@ -309,11 +328,16 @@ class Game {
     // Навигационная сетка (асфальт/тротуар/земля/дома) — по ней ходят
     // пешеходы и проверяются полосы трафика (lib/world/nav_grid.dart).
     final nav = await NavGrid.load();
-    pedestrians = PedestrianSystem(nav: nav, population: quality.pedestrianPopulation);
+    pedestrians = PedestrianSystem(nav: nav, population: quality.pedestrianPopulation, characters: _characters);
     scene.add(pedestrians.buildNode());
     bool onAsphalt(vm.Vector3 from, vm.Vector3 to) =>
         nav.badFraction(from.x, from.z, to.x, to.z, nav.isDrivable) <= 0.05;
-    policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene, edgeIsClear: onAsphalt);
+    policeSystem = await PoliceSystem.create(
+      graph: roadGraph,
+      scene: scene,
+      edgeIsClear: onAsphalt,
+      characters: _characters,
+    );
     final trafficNetwork = TrafficNetwork(
       roadGraph,
       // Полоса — только по асфальту (допуск 5% на края клеток сетки).
@@ -812,6 +836,14 @@ class Game {
   /// на половину полного роста, чтобы капсула не уходила под землю.
   Node _buildPlayerNode() {
     final node = Node();
+    final characters = _characters;
+    if (characters != null) {
+      final model = _playerModel = characters.create(characters.roster.player);
+      model.play(CharacterAnim.idle, fadeSeconds: 0);
+      node.add(model.node);
+      _playerMeshNode = model.node;
+      return node;
+    }
 
     const totalHeight = _playerCapsuleHeight + _playerCapsuleRadius * 2;
     final meshNode = Node(
@@ -896,6 +928,7 @@ class Game {
       muzzle: muzzle,
     );
     if (shot == null) return;
+    _firedThisFrame = true;
     _weaponEffects.showShot(shot);
     audio.gunshot(shot.muzzle);
     for (final bullet in shot.bullets) {
@@ -905,6 +938,22 @@ class Game {
     for (final kill in shot.kills) {
       _dropLoot(kill.feet, kill.kind);
     }
+  }
+
+  /// Клип модели игрока: убит — лежит, целится — оружие наизготовку
+  /// (выстрел — отдача), иначе стоит/идёт/бежит по скорости. За рулём
+  /// модель спрятана — не анимируется.
+  void _updatePlayerModel(double deltaSeconds, {required bool isDriving}) {
+    final model = _playerModel;
+    if (model == null || isDriving) return;
+    final speed = isDead ? 0.0 : (_movement?.horizontalSpeed ?? 0.0);
+    final choice = locomotionAnim(speed: speed, lying: isDead, aiming: cameraController.aiming);
+    if (_firedThisFrame && choice.anim == CharacterAnim.aim) {
+      model.play(CharacterAnim.shoot, fadeSeconds: 0.05, restart: true);
+    } else if (model.current != CharacterAnim.shoot || model.currentFinished || choice.anim != CharacterAnim.aim) {
+      model.play(choice.anim, rate: choice.rate, fadeSeconds: isDead ? 0.12 : 0.2);
+    }
+    model.update(deltaSeconds);
   }
 
   /// Добыча с убитого: деньги, а с полицейского ещё и патроны (иначе
@@ -928,8 +977,6 @@ class Game {
       audio.pickup();
     }
     _pickupsView.update(deltaSeconds);
-    _tmpT += deltaSeconds; // TMP_NAV
-    if ((_tmpT * 2).floor() != ((_tmpT - deltaSeconds) * 2).floor() && _tmpT < 62) { bool inside(vm.Vector3 p) { final hit = raycastNode(scene.root, vm.Ray.originDirection(vm.Vector3(p.x, 40, p.z), vm.Vector3(0, -1, 0)), maxDistance: 60); return hit != null && 40 - hit.distance > 2.5; } var peds = 0, pedsIn = 0, cars = 0, carsIn = 0; for (final p in pedestrians.positions) { peds++; if (inside(p)) pedsIn++; } for (final n in traffic.carNodes) { cars++; if (inside(n.globalTransform.getTranslation())) carsIn++; } _tmpPedsIn += pedsIn; _tmpCarsIn += carsIn; _tmpSamples += peds + cars; if (_tmpT > 60) print('TMP_N samples=$_tmpSamples pedsInside=$_tmpPedsIn carsInside=$_tmpCarsIn'); } // TMP_NAV
     _propertyMarkers.update(deltaSeconds);
   }
 
@@ -957,6 +1004,10 @@ class Game {
     _vegetation?.commitShadowCache();
 
     final isDriving = gameModeState.mode == ControlMode.driving;
+    final viewForward = cameraController.forward;
+    pedestrians
+      ..viewPosition = cameraNode.globalTransform.getTranslation()
+      ..viewForward = vm.Vector3(viewForward.x, 0, viewForward.z);
     final hits = pedestrians.update(
       deltaSeconds,
       trackedPosition,
@@ -969,7 +1020,9 @@ class Game {
       isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
+    _firedThisFrame = false;
     _updateWeapon(deltaSeconds, isDriving: isDriving);
+    _updatePlayerModel(deltaSeconds, isDriving: isDriving);
     _updateWeather(deltaSeconds);
     signals.advance(deltaSeconds);
     _signalsView.update();
@@ -1200,7 +1253,8 @@ class Game {
   /// Капсула игрока лежит на земле (убит) или стоит.
   void _setPlayerLying(bool lying) {
     final mesh = _playerMeshNode;
-    if (mesh == null) return;
+    // Модель падает клипом смерти (см. _updatePlayerModel).
+    if (mesh == null || _playerModel != null) return;
     const totalHeight = _playerCapsuleHeight + _playerCapsuleRadius * 2;
     mesh.localTransform = lying
         ? vm.Matrix4.compose(

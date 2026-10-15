@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../characters/character_animation.dart';
+import '../characters/character_library.dart';
+import '../characters/character_model.dart';
 import '../weapons/ballistics.dart';
 import '../weapons/player_shooting.dart';
 import '../world/nav_grid.dart';
@@ -18,12 +21,13 @@ typedef PedestrianShotHit = ({int index, double distance, BodyZone zone});
 /// pedestrian.dart — сама ходьба проверена юнит-тестами отдельно от
 /// рендера).
 ///
-/// Рендер — один общий `InstancedMesh` на всех пешеходов (капсулы, как у
-/// игрока, только меньше и разного цвета) — один draw call независимо от
-/// [population].
+/// Рендер — анимированные модели людей из [characters] (по draw call'у на
+/// человека, см. tools/assets/prepare_characters.mjs). Без библиотеки
+/// моделей (юнит-тесты без GPU) — прежние капсулы одним `InstancedMesh`.
 class PedestrianSystem implements ShootTargets {
   PedestrianSystem({
     required this.nav,
+    this.characters,
     this.population = 16,
     this.spawnRadius = 120.0,
     this.despawnRadius = 180.0,
@@ -59,8 +63,32 @@ class PedestrianSystem implements ShootTargets {
   final double walkSpeed;
   final InstancedMesh bodies;
 
+  /// Модели людей; null — капсулы.
+  final CharacterLibrary? characters;
+
+  /// Дальше этого от игрока модель прячется (и не анимируется) — сам
+  /// пешеход при этом продолжает жить (см. PROGRESS.md: существование по
+  /// расстоянию отдельно от рендера).
+  static const double modelVisibleDistance = 110.0;
+
+  /// Камера (положение и направление взгляда по горизонтали) — модели за
+  /// её спиной прячутся: у скинованных мешей нет границ, движок не
+  /// отсекает их по кадру и анимирует даже невидимых (см. CharacterModel).
+  vm.Vector3? viewPosition;
+  vm.Vector3? viewForward;
+
+  /// Насколько позади камеры модель ещё держится (корпус, тень на экране).
+  static const double _behindViewMargin = 4.0;
+
   final math.Random _random;
   final List<Pedestrian> _pedestrians = [];
+
+  /// Модель пешехода с тем же номером (пусто без [characters]).
+  final List<CharacterModel> _models = [];
+
+  /// Где пешеход был кадр назад — для скорости, от которой зависит клип.
+  final List<vm.Vector3> _lastPositions = [];
+  final Node _root = Node();
   bool _spawned = false;
 
   /// Ниже которой наезд машиной не считается — стоящая/едва катящаяся
@@ -68,7 +96,10 @@ class PedestrianSystem implements ShootTargets {
   static const double hitSpeedThreshold = 3.0;
   static const double _hitRadius = 1.0;
 
-  Node buildNode() => Node()..addComponent(InstancedMeshComponent(bodies));
+  Node buildNode() {
+    if (characters == null) _root.addComponent(InstancedMeshComponent(bodies));
+    return _root;
+  }
 
   /// Позиции пешеходов — перед ними тормозит трафик (см. lib/traffic/).
   Iterable<vm.Vector3> get positions => _pedestrians.map((p) => p.position);
@@ -108,7 +139,11 @@ class PedestrianSystem implements ShootTargets {
   bool applyShot(int index, double damage, vm.Vector3 from) {
     final pedestrian = _pedestrians[index];
     final killed = pedestrian.takeDamage(damage, from);
-    bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+    if (_models.isEmpty) {
+      bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+    } else if (!killed) {
+      _models[index].play(CharacterAnim.hit, fadeSeconds: 0.08, restart: true);
+    }
     return killed;
   }
 
@@ -160,7 +195,8 @@ class PedestrianSystem implements ShootTargets {
     final canHit = vehiclePosition != null && vehicleSpeed >= hitSpeedThreshold;
     final hitRadiusSq = _hitRadius * _hitRadius;
     final despawnRadiusSq = despawnRadius * despawnRadius;
-    for (final pedestrian in _pedestrians) {
+    for (var i = 0; i < _pedestrians.length; i++) {
+      final pedestrian = _pedestrians[i];
       advancePedestrian(
         pedestrian,
         walkable: nav.isWalkable,
@@ -186,9 +222,44 @@ class PedestrianSystem implements ShootTargets {
         _respawnNear(pedestrian, trackedPosition);
       }
 
-      bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+      if (_models.isEmpty) {
+        bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+      } else {
+        _updateModel(i, dt, trackedPosition);
+      }
     }
     return hits;
+  }
+
+  /// Модель следует за пешеходом; клип — по состоянию и реальной скорости.
+  void _updateModel(int i, double dt, vm.Vector3 trackedPosition) {
+    final pedestrian = _pedestrians[i];
+    final model = _models[i];
+    final last = _lastPositions[i];
+    final moved = math.sqrt(math.pow(pedestrian.position.x - last.x, 2) + math.pow(pedestrian.position.z - last.z, 2));
+    last.setFrom(pedestrian.position);
+    final eye = viewPosition;
+    final forward = viewForward;
+    final visible =
+        (pedestrian.position - trackedPosition).length2 <= modelVisibleDistance * modelVisibleDistance &&
+        (eye == null ||
+            forward == null ||
+            (pedestrian.position.x - eye.x) * forward.x + (pedestrian.position.z - eye.z) * forward.z > -_behindViewMargin);
+    model.visible = visible;
+    if (!visible) return;
+    model.node.position = pedestrian.position;
+    model.node.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), pedestrian.yaw);
+    final lying = pedestrian.isDead || pedestrian.isKnockedDown;
+    // Удар пулей доигрывается, если раненый не упал.
+    final reacting = model.current == CharacterAnim.hit && !model.currentFinished && !lying;
+    if (!reacting) {
+      // Сбитый машиной отлетает со скоростью — это не бег; скачок за кадр
+      // дальше пары метров — переселение, а не движение.
+      final speed = lying || dt <= 0 || moved > 3.0 ? 0.0 : moved / dt;
+      final choice = locomotionAnim(speed: speed, lying: lying);
+      model.play(choice.anim, rate: choice.rate, fadeSeconds: lying ? 0.12 : 0.25);
+    }
+    model.update(dt);
   }
 
   /// Стоящий — капсула вертикально по курсу; сбитый или убитый — лежит на
@@ -212,10 +283,18 @@ class PedestrianSystem implements ShootTargets {
   void _spawnInitialPopulation(vm.Vector3 center) {
     for (var i = 0; i < population; i++) {
       final pedestrian = Pedestrian(position: _randomSpotNear(center), yaw: _random.nextDouble() * 2 * math.pi);
-      pedestrian.instanceIndex = bodies.addInstance(
-        _instanceTransform(pedestrian),
-        color: _palette[_random.nextInt(_palette.length)],
-      );
+      final library = characters;
+      if (library == null) {
+        pedestrian.instanceIndex = bodies.addInstance(
+          _instanceTransform(pedestrian),
+          color: _palette[_random.nextInt(_palette.length)],
+        );
+      } else {
+        final model = library.createCivilian(_random);
+        _models.add(model);
+        _root.add(model.node);
+      }
+      _lastPositions.add(pedestrian.position.clone());
       _pedestrians.add(pedestrian);
     }
   }

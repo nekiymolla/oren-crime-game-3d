@@ -7,6 +7,7 @@ import '../vehicles/vehicle.dart';
 import '../vehicles/vehicle_spec.dart';
 import '../world/road_graph.dart';
 import 'police_car.dart';
+import '../characters/character_library.dart';
 import 'police_officers.dart';
 import 'road_pathfinding.dart';
 import 'wanted_state.dart';
@@ -66,7 +67,9 @@ class PoliceSystem {
     required VehicleSpec policeSpec,
     bool Function(vm.Vector3 a, vm.Vector3 b)? edgeIsClear,
     math.Random? random,
+    PoliceOfficers? officers,
   }) : adjacency = buildVehicleAdjacency(graph, edgeIsClear: edgeIsClear),
+      officers = officers ?? PoliceOfficers(),
       _policeSpec = policeSpec,
       _random = random ?? math.Random();
 
@@ -79,9 +82,17 @@ class PoliceSystem {
     required Scene scene,
     bool Function(vm.Vector3 a, vm.Vector3 b)? edgeIsClear,
     math.Random? random,
+    CharacterLibrary? characters,
   }) async {
     final spec = await loadVehicleSpec('car_police_01') ?? _fallbackPoliceSpec;
-    return PoliceSystem._(graph: graph, scene: scene, policeSpec: spec, edgeIsClear: edgeIsClear, random: random);
+    return PoliceSystem._(
+      graph: graph,
+      scene: scene,
+      policeSpec: spec,
+      edgeIsClear: edgeIsClear,
+      random: random,
+      officers: PoliceOfficers(characters: characters),
+    );
   }
 
   final RoadGraph graph;
@@ -106,7 +117,7 @@ class PoliceSystem {
   Iterable<vm.Vector3> _blockers = const [];
 
   /// Полицейские пешком (см. police_officers.dart).
-  final PoliceOfficers officers = PoliceOfficers();
+  final PoliceOfficers officers;
 
   /// С этого уровня полиция не задерживает, а применяет оружие: машина,
   /// догнав игрока, останавливается и высаживает офицеров.

@@ -1,0 +1,11 @@
+{
+  "name": "asset_pipeline",
+  "private": true,
+  "type": "module",
+  "description": "Подготовка сторонних моделей (CC0, см. assets/models/CREDITS.md) к игре: запекание материалов в цвета вершин, склейка в один draw call, перецентровка колёс. Не часть приложения.",
+  "devDependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0"
+  }
+}
