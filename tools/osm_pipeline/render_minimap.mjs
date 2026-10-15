@@ -5,6 +5,14 @@
 // calibration.json, так что на самой картинке север внизу — радар её
 // поворачивает сам).
 //
+// Заодно пишет навигационную сетку nav_grid.bin (1 м на клетку, байт на
+// клетку): 0 земля/газон, 1 крупная дорога (только машины), 2 мелкая
+// дорога (машины, пешеходы могут переходить), 3 тротуар, 4 дом. По ней
+// пешеходы бродят, не заходя в дома и на крупные дороги, а полосы трафика
+// отбрасываются, если задевают не-асфальт (lib/world/nav_grid.dart).
+// Тип дороги — по ближайшему ребру дорожного графа (road_graph.json рядом
+// с out.json, в координатах игры).
+//
 // Использование: node render_minimap.mjs <chunks_dir> <out.png> <out.json>
 // (PNG кодирует ffmpeg из промежуточного PPM.)
 
@@ -31,6 +39,64 @@ const width = Math.round((maxX - minX) / METERS_PER_PIXEL);
 const height = Math.round((maxZ - minZ) / METERS_PER_PIXEL);
 
 const geometry = await loadChunkGeometry(chunksDir);
+
+// --- Навигационная сетка 1 м ---------------------------------------------
+const NAV_CELL = 1;
+const navWidth = Math.round((maxX - minX) / NAV_CELL);
+const navHeight = Math.round((maxZ - minZ) / NAV_CELL);
+const MAJOR = new Set(['tertiary', 'secondary', 'primary', 'trunk', 'motorway']);
+const graph = JSON.parse(fs.readFileSync(path.join(path.dirname(outJson), 'road_graph.json'), 'utf8'));
+const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
+// Рёбра в корзинах по 16 м — ближайшее ребро ищется только рядом.
+const BUCKET = 16;
+const buckets = new Map();
+for (const e of graph.edges) {
+  const a = nodeById.get(e.from);
+  const b = nodeById.get(e.to);
+  if (!a || !b) continue;
+  const seg = { ax: a.x, az: a.z, bx: b.x, bz: b.z, major: MAJOR.has(e.highway) };
+  const x0 = Math.floor((Math.min(a.x, b.x) - 12) / BUCKET), x1 = Math.floor((Math.max(a.x, b.x) + 12) / BUCKET);
+  const z0 = Math.floor((Math.min(a.z, b.z) - 12) / BUCKET), z1 = Math.floor((Math.max(a.z, b.z) + 12) / BUCKET);
+  for (let i = x0; i <= x1; i++) for (let j = z0; j <= z1; j++) {
+    const key = `${i},${j}`;
+    if (!buckets.has(key)) buckets.set(key, []);
+    buckets.get(key).push(seg);
+  }
+}
+function nearestIsMajor(x, z) {
+  let best = Infinity, major = false;
+  for (const s of buckets.get(`${Math.floor(x / BUCKET)},${Math.floor(z / BUCKET)}`) ?? []) {
+    const dx = s.bx - s.ax, dz = s.bz - s.az;
+    const len2 = dx * dx + dz * dz || 1e-9;
+    const t = Math.max(0, Math.min(1, ((x - s.ax) * dx + (z - s.az) * dz) / len2));
+    const d = Math.hypot(s.ax + dx * t - x, s.az + dz * t - z);
+    if (d < best) { best = d; major = s.major; }
+  }
+  // Асфальт далеко от любого ребра (площадки, парковки) — считаем мелким.
+  return best <= 12 && major;
+}
+const nav = new Uint8Array(navWidth * navHeight);
+const navCounts = [0, 0, 0, 0, 0];
+for (let py = 0; py < navHeight; py++) {
+  for (let px = 0; px < navWidth; px++) {
+    const x = minX + (px + 0.5) * NAV_CELL;
+    const z = minZ + (py + 0.5) * NAV_CELL;
+    const surface = geometry.topSurfaceAt(x, z);
+    let k = 0;
+    if (surface) {
+      if (surface.y > 2.5) k = 4;
+      else if (/ASPHALT|road_marking/.test(surface.material)) k = nearestIsMajor(x, z) ? 1 : 2;
+      else if (/EARTH/.test(surface.material)) k = 0;
+      else k = 3;
+    }
+    nav[py * navWidth + px] = k;
+    navCounts[k]++;
+  }
+}
+const navFile = path.join(path.dirname(outJson), 'nav_grid.bin');
+fs.writeFileSync(navFile, nav);
+console.log(`Навсетка ${navWidth}x${navHeight} (${NAV_CELL} м): земля ${navCounts[0]}, крупные дороги ${navCounts[1]}, мелкие ${navCounts[2]}, тротуары ${navCounts[3]}, дома ${navCounts[4]}`);
+
 
 // Не "хмурая" палитра: светлее и теплее, чем у GTA IV.
 const GROUND = [92, 118, 84];
@@ -80,7 +146,16 @@ execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', ppm, outPng]);
 fs.unlinkSync(ppm);
 fs.writeFileSync(
   outJson,
-  JSON.stringify({ image: path.basename(outPng), minX, minZ, maxX, maxZ, metersPerPixel: METERS_PER_PIXEL, width, height }, null, 2) + '\n',
+  JSON.stringify(
+    {
+      image: path.basename(outPng),
+      minX, minZ, maxX, maxZ,
+      metersPerPixel: METERS_PER_PIXEL, width, height,
+      nav: { file: 'nav_grid.bin', metersPerCell: NAV_CELL, width: navWidth, height: navHeight },
+    },
+    null,
+    2,
+  ) + '\n',
 );
 const counts = [0, 0, 0, 0];
 for (const k of kind) counts[k]++;

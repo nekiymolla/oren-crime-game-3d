@@ -60,8 +60,13 @@ const _fallbackPoliceSpec = VehicleSpec(maxSpeedKmh: 190.0, acceleration: 15.0, 
 /// погоня читалась, и не добавляет заметной нагрузки на слабый Android
 /// поверх уже больной FPS-картины (см. PROGRESS.md, "Диагностика лагов").
 class PoliceSystem {
-  PoliceSystem._({required this.graph, required this.scene, required VehicleSpec policeSpec, math.Random? random})
-    : adjacency = buildVehicleAdjacency(graph),
+  PoliceSystem._({
+    required this.graph,
+    required this.scene,
+    required VehicleSpec policeSpec,
+    bool Function(vm.Vector3 a, vm.Vector3 b)? edgeIsClear,
+    math.Random? random,
+  }) : adjacency = buildVehicleAdjacency(graph, edgeIsClear: edgeIsClear),
       _policeSpec = policeSpec,
       _random = random ?? math.Random();
 
@@ -69,9 +74,14 @@ class PoliceSystem {
   /// сам спавн машины внутри update() синхронный (buildVehicleWithSpec, а
   /// не buildVehicle), потому что update() зовётся каждый кадр из
   /// Game.tick(), который не async.
-  static Future<PoliceSystem> create({required RoadGraph graph, required Scene scene, math.Random? random}) async {
+  static Future<PoliceSystem> create({
+    required RoadGraph graph,
+    required Scene scene,
+    bool Function(vm.Vector3 a, vm.Vector3 b)? edgeIsClear,
+    math.Random? random,
+  }) async {
     final spec = await loadVehicleSpec('car_police_01') ?? _fallbackPoliceSpec;
-    return PoliceSystem._(graph: graph, scene: scene, policeSpec: spec, random: random);
+    return PoliceSystem._(graph: graph, scene: scene, policeSpec: spec, edgeIsClear: edgeIsClear, random: random);
   }
 
   final RoadGraph graph;

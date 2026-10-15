@@ -46,13 +46,34 @@ const double _maxCornerOffset = 3.5;
 /// Дорожная сеть для трафика — чистые данные и геометрия полос, без
 /// flutter_scene (проверяется юнит-тестами без GPU).
 class TrafficNetwork {
-  TrafficNetwork(this.graph) {
+  /// [laneIsClear] — проверка полосы от точки до точки (в игре — по
+  /// навигационной сетке: только асфальт). Полосы, которые задевают дома,
+  /// тротуары или газоны, выкидываются из сети: рёбра OSM — прямые между
+  /// узлами и местами режут углы, а ехать сквозь дом нельзя (BUGS.md).
+  TrafficNetwork(this.graph, {bool Function(vm.Vector3 from, vm.Vector3 to)? laneIsClear}) {
     for (final edge in graph.edges) {
       if (!trafficHighwayTypes.contains(edge.highway)) continue;
       _addDirected(edge.from, edge.to, edge);
       if (!edge.oneway) _addDirected(edge.to, edge.from, edge);
     }
+    if (laneIsClear == null) return;
+    final rejected = <(String, String)>[];
+    for (final MapEntry(key: from, value: targets) in adjacency.entries) {
+      for (final to in targets) {
+        final start = laneStart(from, to);
+        final end = start + (graph.nodes[to]!.toVector3() - graph.nodes[from]!.toVector3());
+        if (!laneIsClear(start, end)) rejected.add((from, to));
+      }
+    }
+    for (final (from, to) in rejected) {
+      adjacency[from]?.remove(to);
+      _edges.remove('$from|$to');
+    }
+    rejectedLaneCount = rejected.length;
   }
+
+  /// Сколько полос выкинула проверка [laneIsClear] — для логов и тестов.
+  int rejectedLaneCount = 0;
 
   final RoadGraph graph;
 

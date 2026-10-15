@@ -19,10 +19,17 @@ const Set<String> vehicleHighwayTypes = {
 /// Карта соседей для машин — в отличие от пешеходной (см. pedestrian.dart),
 /// уважает [RoadGraphEdge.oneway]: по одностороннему ребру можно ехать
 /// только from -> to.
-Map<String, List<String>> buildVehicleAdjacency(RoadGraph graph) {
+/// [edgeIsClear] — проверка оси ребра (в игре — по навигационной сетке:
+/// только асфальт); рёбра, режущие дома и газоны, в смежность не попадают.
+Map<String, List<String>> buildVehicleAdjacency(RoadGraph graph, {bool Function(vm.Vector3 a, vm.Vector3 b)? edgeIsClear}) {
   final adjacency = <String, List<String>>{};
   for (final edge in graph.edges) {
     if (!vehicleHighwayTypes.contains(edge.highway)) continue;
+    if (edgeIsClear != null) {
+      final a = graph.nodes[edge.from];
+      final b = graph.nodes[edge.to];
+      if (a == null || b == null || !edgeIsClear(a.toVector3(), b.toVector3())) continue;
+    }
     (adjacency[edge.from] ??= []).add(edge.to);
     if (!edge.oneway) (adjacency[edge.to] ??= []).add(edge.from);
   }

@@ -2,29 +2,34 @@ import 'dart:math' as math;
 
 import 'package:vector_math/vector_math.dart' as vm;
 
-import '../world/road_graph.dart';
+/// Проверка клетки мира по координатам: можно ли туда (пешком / вообще).
+/// В игре это NavGrid (lib/world/nav_grid.dart), в тестах — подставная.
+typedef AreaTest = bool Function(double x, double z);
 
 /// Чистое (без Flutter/flutter_scene) состояние одного NPC-пешехода —
-/// отдельно от рендера (см. pedestrian_system.dart), чтобы саму логику
-/// ходьбы можно было проверить юнит-тестом без GPU (создание геометрии
-/// требует живого Impeller-контекста, см. PROGRESS.md).
+/// отдельно от рендера (см. pedestrian_system.dart), чтобы логику можно
+/// было проверить юнит-тестом без GPU.
 ///
-/// Пешеход всегда идёт к [targetNodeId] по прямой (дороги в дорожном графе
-/// и так соединяют соседние точки короткими сегментами, полноценный A*
-/// не нужен) и на прибытии выбирает случайного соседа текущего узла —
-/// вместо того, откуда пришёл, если есть выбор.
+/// Пешеход бродит хаотично по навигационной сетке района: курс время от
+/// времени меняется случайно, перед каждым шагом путь щупается вперёд, и
+/// в дом или на крупную дорогу пешеход не заходит — поворачивает. Раньше
+/// он шёл по прямой между узлами дорожного графа, и эти прямые (тротуары,
+/// дворовые проезды из OSM) резали углы домов — пешеходы ходили сквозь
+/// стены (BUGS.md).
 class Pedestrian {
-  Pedestrian({
-    required this.position,
-    required this.currentNodeId,
-    required this.targetNodeId,
-    this.yaw = 0.0,
-  });
+  Pedestrian({required this.position, this.yaw = 0.0}) : desiredYaw = yaw;
 
   vm.Vector3 position;
-  String currentNodeId;
-  String targetNodeId;
   double yaw;
+
+  /// Куда хочет идти — к нему поворачивает при первой возможности.
+  double desiredYaw;
+
+  /// Через сколько секунд сменить курс прогулки.
+  double wanderSeconds = 0.0;
+
+  /// Сколько ещё секунд стоит на месте (постоял, огляделся).
+  double idleSeconds = 0.0;
 
   /// Индекс инстанса в общем InstancedMesh (см. PedestrianSystem) — не
   /// логика, просто чтобы рендеру было куда писать обновлённый transform.
@@ -35,13 +40,6 @@ class Pedestrian {
 
   /// Скорость отлёта после удара, гасится трением (см. [advancePedestrian]).
   vm.Vector3 knockbackVelocity = vm.Vector3.zero();
-
-  /// Точка на ребре графа, где пешехода сбили: встав, он сперва
-  /// возвращается сюда, а уже потом идёт к цели. Иначе он пошёл бы к цели
-  /// по прямой из места падения — в стороне от ребра, а гарантия "сквозь
-  /// дома не ходит" держится именно на том, что пешеход идёт по рёбрам
-  /// (см. tools/osm_pipeline/check_road_graph.mjs).
-  vm.Vector3? returnPoint;
 
   bool get isKnockedDown => knockedDownSeconds > 0.0;
 
@@ -62,14 +60,21 @@ class Pedestrian {
   /// задевает — капсула лежит, а проверка попадания под стоящую.
   bool get isShootable => !isDead && !isKnockedDown;
 
+  /// Сколько ещё секунд бежит в панике — скорость в
+  /// [panicSpeedMultiplier] раз выше шага.
+  double panicSeconds = 0.0;
+
+  /// От чего бежит в панике (стрелок, угонщик). null — паника без
+  /// направления.
+  vm.Vector3? fleeFrom;
+
   /// Пуля попала: урон [damage] со стороны [from]. Возвращает true, если
-  /// это убило. Раненый в панике бежит.
+  /// это убило. Раненый в панике бежит прочь.
   bool takeDamage(double damage, vm.Vector3 from) {
     if (isDead) return false;
     health -= damage;
     if (health > 0.0) {
-      panicSeconds = math.max(panicSeconds, 10.0);
-      fleeFrom ??= from.clone();
+      scare(from);
       return false;
     }
     health = 0.0;
@@ -77,12 +82,19 @@ class Pedestrian {
     deadSeconds = 0.0;
     panicSeconds = 0.0;
     fleeFrom = null;
-    returnPoint = null;
     // Падает навзничь от стрелка, без отлёта.
     final away = vm.Vector3(position.x - from.x, 0, position.z - from.z);
     if (away.length2 > 1e-6) yaw = math.atan2(away.x, away.z);
     knockbackVelocity.setZero();
     return true;
+  }
+
+  /// Испугался (выстрел, угон) в [from]: бежит [seconds] секунд прочь.
+  void scare(vm.Vector3 from, {double seconds = 10.0}) {
+    if (isDead) return;
+    panicSeconds = math.max(panicSeconds, seconds);
+    fleeFrom = from.clone();
+    idleSeconds = 0.0;
   }
 
   /// Вернуть к жизни при переселении (новый человек на месте старого).
@@ -92,38 +104,9 @@ class Pedestrian {
     deadSeconds = 0.0;
   }
 
-  /// Сколько ещё секунд бежит в панике (водитель угнанной машины) —
-  /// скорость в [panicSpeedMultiplier] раз выше шага.
-  double panicSeconds = 0.0;
-
-  /// От чего бежит в панике (стрелок) — на развилках графа выбирает
-  /// соседа подальше от этой точки. null — паника без направления.
-  vm.Vector3? fleeFrom;
-
-  /// Испугался выстрела в [from]: бежит [seconds] секунд прочь — по
-  /// текущему ребру в ту сторону, что дальше от [from].
-  void scare(vm.Vector3 from, RoadGraph graph, {double seconds = 10.0}) {
-    if (isDead) return;
-    panicSeconds = math.max(panicSeconds, seconds);
-    fleeFrom = from.clone();
-    final current = graph.nodes[currentNodeId];
-    final target = graph.nodes[targetNodeId];
-    if (current == null || target == null || returnPoint != null) return;
-    if ((current.toVector3() - from).length2 > (target.toVector3() - from).length2) {
-      final previousTarget = targetNodeId;
-      targetNodeId = currentNodeId;
-      currentNodeId = previousTarget;
-    }
-  }
-
   /// Удар машиной: отлетает от [impactFrom] (центр машины) со скоростью,
   /// растущей со скоростью машины [impactSpeed], и лежит [lieSeconds].
-  void knockDown(
-    vm.Vector3 impactFrom,
-    double impactSpeed, {
-    double lieSeconds = 6.0,
-  }) {
-    returnPoint ??= position.clone();
+  void knockDown(vm.Vector3 impactFrom, double impactSpeed, {double lieSeconds = 6.0}) {
     knockedDownSeconds = lieSeconds;
     final away = vm.Vector3(position.x - impactFrom.x, 0, position.z - impactFrom.z);
     if (away.length2 < 1e-6) away.setValues(math.sin(yaw), 0, math.cos(yaw));
@@ -140,126 +123,95 @@ const double panicSpeedMultiplier = 3.5;
 /// он проезжает около метра (6 / 6).
 const double _knockbackFriction = 6.0;
 
-const double _arrivalEpsilon = 0.1;
+/// Насколько вперёд щупать путь: с запасом на корпус, чтобы не тереться
+/// о стену.
+const double pedestrianLookAhead = 1.2;
 
-/// Типы `highway`, по которым реально ходят пешком — не тротуары/полосы
-/// именно для машин (`tertiary` и подобные) или для великов (`cycleway`).
-/// Без фильтра пешеходы гуляли прямо по проезжей части (замечено
-/// пользователем) — в наших OSM-данных отдельных тротуаров почти нет,
-/// `residential`/`unclassified`/`service` — обычные дворовые/жилые улицы
-/// без явного разделения на полосы, пешком по ним ходить реалистично.
-const Set<String> pedestrianHighwayTypes = {
-  'footway',
-  'path',
-  'pedestrian',
-  'living_street',
-  'residential',
-  'unclassified',
-  'service',
-  'steps',
-};
+/// Повороты от желаемого курса, которые пробуются по очереди, если прямо
+/// нельзя: сначала чуть-чуть, потом круче, в конце — назад.
+const List<double> _detours = [0.0, 0.5, -0.5, 1.0, -1.0, 1.6, -1.6, 2.3, -2.3, math.pi];
 
-/// Строит карту соседей по рёбрам графа — двунаправленно (пешеход идёт по
-/// тротуару в любую сторону независимо от oneway для машин), только по
-/// [pedestrianHighwayTypes].
-Map<String, List<String>> buildPedestrianAdjacency(RoadGraph graph) {
-  final adjacency = <String, List<String>>{};
-  for (final edge in graph.edges) {
-    if (!pedestrianHighwayTypes.contains(edge.highway)) continue;
-    (adjacency[edge.from] ??= []).add(edge.to);
-    (adjacency[edge.to] ??= []).add(edge.from);
-  }
-  return adjacency;
-}
-
-/// Двигает [pedestrian] на [speed]*[dt] метров к его текущей цели; по
-/// прибытии выбирает новую цель среди соседей [adjacency] и возвращает
-/// true (полезно для тестов и для эффектов вроде "пешеход дошёл").
-/// Пешеходов с узлом без соседей быть не должно (см. spawn-логику в
-/// PedestrianSystem) — если так всё же случилось, просто стоит на месте.
-bool advancePedestrian(
-  Pedestrian pedestrian,
-  RoadGraph graph,
-  Map<String, List<String>> adjacency, {
+/// Один кадр пешехода. [walkable] — можно ли туда пешком (земля, тротуар,
+/// мелкая дорога), [solid] — нельзя вообще (дом). Пешеход никогда не
+/// шагает в [solid] и, если стоит на проходимом, — не уходит на
+/// непроходимое. Оказался вне проходимого (выпрыгнул из угнанной машины
+/// на крупную дорогу, отлетел от удара) — выбирается любым путём не через
+/// дома.
+void advancePedestrian(
+  Pedestrian pedestrian, {
+  required AreaTest walkable,
+  required AreaTest solid,
   required double dt,
   required double speed,
   required math.Random random,
 }) {
+  final p = pedestrian.position;
   if (pedestrian.isDead) {
     pedestrian.deadSeconds += dt;
-    return false;
+    return;
   }
 
   if (pedestrian.isKnockedDown) {
     pedestrian.knockedDownSeconds = math.max(0.0, pedestrian.knockedDownSeconds - dt);
-    pedestrian.position += pedestrian.knockbackVelocity * dt;
+    final next = p + pedestrian.knockbackVelocity * dt;
+    // В стену не влетает — останавливается о неё.
+    if (solid(next.x, next.z)) {
+      pedestrian.knockbackVelocity.setZero();
+    } else {
+      pedestrian.position = next;
+    }
     pedestrian.knockbackVelocity.scale(math.exp(-_knockbackFriction * dt));
-    return false;
+    return;
   }
 
+  final fleeFrom = pedestrian.fleeFrom;
   if (pedestrian.panicSeconds > 0.0) {
     pedestrian.panicSeconds = math.max(0.0, pedestrian.panicSeconds - dt);
     speed *= panicSpeedMultiplier;
     if (pedestrian.panicSeconds == 0.0) pedestrian.fleeFrom = null;
   }
 
-  // Встал после удара — сначала обратно на ребро (см. Pedestrian.returnPoint).
-  final returnPoint = pedestrian.returnPoint;
-  if (returnPoint != null) {
-    final back = returnPoint - pedestrian.position;
-    final backDistance = back.length;
-    if (backDistance <= _arrivalEpsilon) {
-      pedestrian.position = returnPoint;
-      pedestrian.returnPoint = null;
-    } else {
-      final direction = back / backDistance;
-      pedestrian.position += direction * math.min(speed * dt, backDistance);
-      pedestrian.yaw = math.atan2(direction.x, direction.z);
-      return false;
+  if (fleeFrom != null && pedestrian.panicSeconds > 0.0) {
+    // Прочь от угрозы.
+    final dx = p.x - fleeFrom.x;
+    final dz = p.z - fleeFrom.z;
+    if (dx * dx + dz * dz > 1e-6) pedestrian.desiredYaw = math.atan2(dx, dz);
+  } else {
+    if (pedestrian.idleSeconds > 0.0) {
+      pedestrian.idleSeconds -= dt;
+      return;
     }
-  }
-
-  final target = graph.nodes[pedestrian.targetNodeId];
-  if (target == null) return false;
-
-  final targetPos = target.toVector3();
-  final toTarget = targetPos - pedestrian.position;
-  final distance = toTarget.length;
-
-  if (distance <= _arrivalEpsilon) {
-    pedestrian.position = targetPos;
-    final arrivedNodeId = pedestrian.targetNodeId;
-    final neighbors = adjacency[arrivedNodeId];
-    if (neighbors == null || neighbors.isEmpty) return true;
-
-    final candidates = neighbors.where((id) => id != pedestrian.currentNodeId).toList();
-    final pool = candidates.isNotEmpty ? candidates : neighbors;
-    pedestrian.currentNodeId = arrivedNodeId;
-    final fleeFrom = pedestrian.fleeFrom;
-    if (fleeFrom != null) {
-      // В панике — к соседу, дальнему от стрелка (может быть и тот,
-      // откуда пришёл: бежать назад лучше, чем навстречу).
-      var best = neighbors.first;
-      var bestSq = -1.0;
-      for (final id in neighbors) {
-        final node = graph.nodes[id];
-        if (node == null) continue;
-        final distanceSq = (node.toVector3() - fleeFrom).length2;
-        if (distanceSq > bestSq) {
-          bestSq = distanceSq;
-          best = id;
-        }
+    pedestrian.wanderSeconds -= dt;
+    if (pedestrian.wanderSeconds <= 0.0) {
+      pedestrian.wanderSeconds = 2.0 + random.nextDouble() * 5.0;
+      // Иногда постоять, обычно — свернуть в случайную сторону.
+      if (random.nextDouble() < 0.15) {
+        pedestrian.idleSeconds = 1.0 + random.nextDouble() * 2.5;
+        return;
       }
-      pedestrian.targetNodeId = best;
-    } else {
-      pedestrian.targetNodeId = pool[random.nextInt(pool.length)];
+      pedestrian.desiredYaw = pedestrian.yaw + (random.nextDouble() - 0.5) * math.pi * 0.9;
     }
-    return true;
   }
 
-  final direction = toTarget / distance;
-  final step = math.min(speed * dt, distance);
-  pedestrian.position += direction * step;
-  pedestrian.yaw = math.atan2(direction.x, direction.z);
-  return false;
+  final escaping = !walkable(p.x, p.z);
+  bool canStand(double x, double z) => escaping ? !solid(x, z) : walkable(x, z);
+
+  final step = speed * dt;
+  for (final detour in _detours) {
+    final angle = pedestrian.desiredYaw + detour;
+    final sx = math.sin(angle);
+    final sz = math.cos(angle);
+    final aheadX = p.x + sx * pedestrianLookAhead;
+    final aheadZ = p.z + sz * pedestrianLookAhead;
+    final nextX = p.x + sx * step;
+    final nextZ = p.z + sz * step;
+    if (!canStand(aheadX, aheadZ) || !canStand(nextX, nextZ)) continue;
+    pedestrian.position = vm.Vector3(nextX, p.y, nextZ);
+    pedestrian.yaw = angle;
+    // Свернул — теперь идёт туда, а не бьётся в ту же стену.
+    if (detour != 0.0) pedestrian.desiredYaw = angle;
+    return;
+  }
+  // Тупик со всех сторон — развернуться и попробовать в следующий кадр.
+  pedestrian.desiredYaw += math.pi;
 }

@@ -44,6 +44,7 @@ import '../weapons/weapon_effects_view.dart';
 import '../weapons/weapon_state.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
+import '../world/nav_grid.dart';
 import '../world/neon_signs.dart';
 import '../world/road_graph.dart';
 import '../world/terrain.dart';
@@ -146,19 +147,13 @@ class Game {
 
   Node? _playerMeshNode;
 
-  /// Розовые лучи "пешеход → цель" (см. PedestrianSystem.
-  /// buildDebugTargetLinesNode) — только в debug-сборке, рядом с жёлтым
-  /// дорожным графом. null, если debugShowRoadGraph выключен.
-  Node? _pedestrianDebugLinesNode;
-
   /// Отладочный слой дорожного графа (только при [debugShowRoadGraph]).
   Node? _roadGraphDebugNode;
 
-  /// Для debug-панели: показать/скрыть слой графа и линии целей пешеходов.
+  /// Для debug-панели: показать/скрыть слой дорожного графа.
   bool get roadGraphDebugVisible => _roadGraphDebugNode?.visible ?? false;
   set roadGraphDebugVisible(bool value) {
     _roadGraphDebugNode?.visible = value;
-    _pedestrianDebugLinesNode?.visible = value;
   }
 
   /// Публичный, чтобы GameHud мог подключить [CameraControls] — сам
@@ -198,6 +193,7 @@ class Game {
   /// Недвижимость (lib/properties/): что куплено, где возрождаться.
   late final PropertySystem properties;
   late final PropertyMarkersView _propertyMarkers;
+  double _tmpT = 0; int _tmpPedsIn = 0, _tmpCarsIn = 0, _tmpSamples = 0; // TMP_NAV
 
   /// Звук (lib/audio/).
   late final AudioSystem audio;
@@ -310,14 +306,21 @@ class Game {
       scene.add(graphNode);
     }
 
-    pedestrians = PedestrianSystem(graph: roadGraph, raycastRoot: scene.root, population: quality.pedestrianPopulation);
+    // Навигационная сетка (асфальт/тротуар/земля/дома) — по ней ходят
+    // пешеходы и проверяются полосы трафика (lib/world/nav_grid.dart).
+    final nav = await NavGrid.load();
+    pedestrians = PedestrianSystem(nav: nav, population: quality.pedestrianPopulation);
     scene.add(pedestrians.buildNode());
-    if (debugShowRoadGraph) {
-      _pedestrianDebugLinesNode = pedestrians.buildDebugTargetLinesNode()..visible = false;
-      scene.add(_pedestrianDebugLinesNode!);
-    }
-    policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene);
-    final trafficNetwork = TrafficNetwork(roadGraph);
+    bool onAsphalt(vm.Vector3 from, vm.Vector3 to) =>
+        nav.badFraction(from.x, from.z, to.x, to.z, nav.isDrivable) <= 0.05;
+    policeSystem = await PoliceSystem.create(graph: roadGraph, scene: scene, edgeIsClear: onAsphalt);
+    final trafficNetwork = TrafficNetwork(
+      roadGraph,
+      // Полоса — только по асфальту (допуск 5% на края клеток сетки).
+      laneIsClear: onAsphalt,
+    );
+    // ignore: avoid_print
+    print('Трафик: отброшено полос не по асфальту: ${trafficNetwork.rejectedLaneCount}');
     signals = TrafficSignals.fromNetwork(trafficNetwork);
     _signalsView = TrafficSignalsView(signals);
     scene.add(_signalsView.buildNode());
@@ -925,6 +928,8 @@ class Game {
       audio.pickup();
     }
     _pickupsView.update(deltaSeconds);
+    _tmpT += deltaSeconds; // TMP_NAV
+    if ((_tmpT * 2).floor() != ((_tmpT - deltaSeconds) * 2).floor() && _tmpT < 62) { bool inside(vm.Vector3 p) { final hit = raycastNode(scene.root, vm.Ray.originDirection(vm.Vector3(p.x, 40, p.z), vm.Vector3(0, -1, 0)), maxDistance: 60); return hit != null && 40 - hit.distance > 2.5; } var peds = 0, pedsIn = 0, cars = 0, carsIn = 0; for (final p in pedestrians.positions) { peds++; if (inside(p)) pedsIn++; } for (final n in traffic.carNodes) { cars++; if (inside(n.globalTransform.getTranslation())) carsIn++; } _tmpPedsIn += pedsIn; _tmpCarsIn += carsIn; _tmpSamples += peds + cars; if (_tmpT > 60) print('TMP_N samples=$_tmpSamples pedsInside=$_tmpPedsIn carsInside=$_tmpCarsIn'); } // TMP_NAV
     _propertyMarkers.update(deltaSeconds);
   }
 
@@ -958,9 +963,6 @@ class Game {
       vehiclePosition: isDriving ? vehicle.node.globalTransform.getTranslation() : null,
       vehicleSpeed: isDriving ? vehicle.controller.speed : 0.0,
     );
-    if (_pedestrianDebugLinesNode != null) {
-      pedestrians.updateDebugTargetLines(_pedestrianDebugLinesNode!);
-    }
     wantedSystem.update(
       deltaSeconds,
       pedestrianHits: hits,
