@@ -25,6 +25,7 @@ import '../vehicles/vehicle.dart';
 import '../vehicles/vehicle_spec.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
+import '../world/neon_signs.dart';
 import '../world/road_graph.dart';
 import '../world/terrain.dart';
 import '../world/vegetation.dart';
@@ -98,6 +99,9 @@ class Game {
   /// — ясно, чтобы первым игрок увидел закат в духе Вайс-Сити.
   final WeatherSystem weather = WeatherSystem(initial: WeatherKind.clear);
   late final WeatherView _weatherView;
+
+  /// Неоновые вывески на фасадах вдоль крупных улиц (lib/world/neon_signs.dart).
+  NeonSignsView? _neon;
   CameraComponent? _cameraComponent;
   Skybox? _skybox;
   EnvironmentMap? _environment;
@@ -206,6 +210,7 @@ class Game {
     );
     scene.add(_weatherView.buildNode());
     dayNight.visibleSky = shaderSky;
+    await _buildNeon();
     // Сразу выставить небо/свет на стартовое время — иначе первый кадр был
     // бы дневным статичным.
     dayNight.update(0, weather: weather.params);
@@ -522,6 +527,21 @@ class Game {
     return sunNode;
   }
 
+  /// Неон — вывески из assets/data/neon_signs.json и мягкие пятна света от
+  /// них (шейдер neon_glow.fmat). Не загрузился шейдер — вывески без пятен.
+  Future<void> _buildNeon() async {
+    final signs = await loadNeonSigns();
+    Material? glow;
+    try {
+      glow = await loadFmatMaterial('assets/shaders/neon_glow.fmat');
+    } catch (error) {
+      // ignore: avoid_print
+      print('Шейдер пятен неона не загрузился: $error');
+    }
+    final neon = _neon = NeonSignsView(signs, glowMaterial: glow);
+    scene.add(neon.buildNode());
+  }
+
   /// Видимое небо — шейдер assets/shaders/crime_sky.fmat: чёткий диск
   /// солнца, луна с фазами, звёзды. Освещение сцены по-прежнему
   /// запекается с градиентного неба ([_buildSky]): иначе HDR-диск солнца
@@ -709,6 +729,8 @@ class Game {
       dayOfYear: clock.dayOfYear,
     );
     _vegetation?.setSnowCover(params.snowCover);
+    final lighting = dayNight.lighting!;
+    _neon?.update(deltaSeconds, nightFactor: lighting.nightFactor, goldenHour: lighting.goldenHour);
   }
 
   /// То, перед чем тормозит трафик помимо друг друга: игрок (пешком или

@@ -1,0 +1,27 @@
+// Мягкое пятно света неона: на асфальте под вывеской и ореол на стене
+// вокруг неё. Цвет — у каждого инстанса свой (цвет инстанса приходит через
+// GetVertexColor), яркость пятна — в его альфе (ночь/день, см.
+// NeonSignsView). Альфа-смешивание (аддитивного в движке нет): на тёмной
+// ночной земле разница не видна.
+material {
+  name: "NeonGlow",
+  shading_model: unlit,
+  blending: alpha,
+  culling: none,
+  depth_write: false,
+  parameters: [
+    { type: float, name: intensity, default: 1.6 },
+  ],
+}
+
+fragment {
+  void Surface(inout MaterialInputs material) {
+    vec2 uv = GetUV(0) - 0.5;
+    // Эллипс на всю плоскость, плавно гаснущий к краям.
+    float d = length(uv) * 2.0;
+    float falloff = 1.0 - smoothstep(0.0, 1.0, d);
+    falloff *= falloff;
+    vec4 tint = GetVertexColor();
+    material.base_color = vec4(tint.rgb * material_params.intensity, falloff * tint.a);
+  }
+}

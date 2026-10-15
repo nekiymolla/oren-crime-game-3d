@@ -73,4 +73,11 @@ python3 "$SCRIPT_DIR/build_road_graph.py" "$INPUT_FILE" "$CALIBRATION_FILE" \
 node "$SCRIPT_DIR/check_road_graph.mjs" "$CHUNKS_DIR" \
   "$SCRIPT_DIR/../../assets/data/road_graph.json"
 
+# Неоновые вывески: кандидаты — стены домов вдоль крупных улиц (OSM),
+# отбор — по 3D-геометрии чанков (см. оба скрипта).
+python3 "$SCRIPT_DIR/place_neon_signs.py" "$INPUT_FILE" "$CALIBRATION_FILE" \
+  "$SCRIPT_DIR/../../assets/data/road_graph.json" "$SCRIPT_DIR/neon_candidates.json"
+node "$SCRIPT_DIR/filter_neon_signs.mjs" "$CHUNKS_DIR" "$SCRIPT_DIR/neon_candidates.json" \
+  "$SCRIPT_DIR/../../assets/data/neon_signs.json"
+
 echo "Готово: $CHUNKS_DIR ($(du -sh "$CHUNKS_DIR" | cut -f1))"
