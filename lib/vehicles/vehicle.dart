@@ -6,12 +6,12 @@ import 'package:vector_math/vector_math.dart' as vm;
 import 'vehicle_controller_component.dart';
 import 'vehicle_damage.dart';
 import 'vehicle_input_bridge_component.dart';
+import 'vehicle_models.dart';
 import 'vehicle_spec.dart';
 
 /// Габариты одного силуэта машины — общие для всех архетипов
 /// (см. [VehicleArchetype]), чтобы не дублировать сборку кузова/колёс на
-/// каждый новый тип. [cargoBedLength] > 0 достраивает открытый кузов
-/// пикапа позади кабины (см. [_buildBodyVariant]).
+/// каждый новый тип.
 class VehicleDimensions {
   VehicleDimensions({
     required this.bodyWidth,
@@ -23,9 +23,15 @@ class VehicleDimensions {
     required this.cabinZOffset,
     required this.wheelRadius,
     required this.wheelWidth,
-    this.cargoBedLength = 0.0,
     required this.paintColor,
+    this.modelId,
   });
+
+  /// Модель из assets/models/vehicles (см. [VehicleModels]); без неё или
+  /// пока модели не загружены — процедурная сборка из кубов. Габариты выше
+  /// у машин с моделью сняты с самой модели (prepare_vehicles.mjs) — по ним
+  /// считаются столкновения.
+  final String? modelId;
 
   final double bodyWidth;
   final double chassisHeight;
@@ -35,12 +41,11 @@ class VehicleDimensions {
   final double cabinWidth;
 
   /// Смещение кабины по Z от центра кузова — отрицательное к корме
-  /// (силуэт седана/хэтчбека), положительное к носу (пикап — кабина
+  /// (силуэт седана/хэтчбека), положительное к носу (кабина
   /// впереди, кузов сзади).
   final double cabinZOffset;
   final double wheelRadius;
   final double wheelWidth;
-  final double cargoBedLength;
   final vm.Vector4 paintColor;
 
   /// Тот же силуэт другого цвета — для разноцветного трафика.
@@ -54,69 +59,119 @@ class VehicleDimensions {
     cabinZOffset: cabinZOffset,
     wheelRadius: wheelRadius,
     wheelWidth: wheelWidth,
-    cargoBedLength: cargoBedLength,
     paintColor: color,
+    modelId: modelId,
   );
 }
 
-/// Готовые силуэты — три разных типа машины на одной и той же процедурной
-/// сборке (см. [VehicleDimensions]), а не три отдельных куска кода.
+/// Готовые типы машин. Габариты кузова и колёс — с моделей (см.
+/// tools/assets/prepare_vehicles.mjs), высоты кабины — для процедурной
+/// сборки на случай, когда моделей нет (тесты).
 class VehicleArchetype {
   static final sedan = VehicleDimensions(
-    bodyWidth: 1.8,
-    chassisHeight: 0.65,
-    bodyLength: 4.4,
-    cabinHeight: 0.62,
-    cabinLength: 2.3,
-    cabinWidth: 1.8 * 0.86,
+    bodyWidth: 1.81,
+    chassisHeight: 0.6,
+    bodyLength: 4.22,
+    cabinHeight: 0.55,
+    cabinLength: 2.2,
+    cabinWidth: 1.81 * 0.86,
     cabinZOffset: -0.35, // сдвиг кабины к корме — силуэт седана
-    wheelRadius: 0.33,
+    wheelRadius: 0.262,
     wheelWidth: 0.22,
     paintColor: vm.Vector4(0.12, 0.32, 0.62, 1.0), // синий
+    modelId: 'sedan',
   );
 
   static final hatchback = VehicleDimensions(
-    bodyWidth: 1.6,
+    bodyWidth: 1.64,
     chassisHeight: 0.55,
-    bodyLength: 3.4, // короче седана — компактный городской силуэт
-    cabinHeight: 0.6,
-    cabinLength: 2.1, // кабина занимает почти весь кузов, багажника почти нет
-    cabinWidth: 1.6 * 0.85,
+    bodyLength: 3.31, // короче седана — компактный городской силуэт
+    cabinHeight: 0.55,
+    cabinLength: 2.0,
+    cabinWidth: 1.64 * 0.85,
     cabinZOffset: -0.15,
-    wheelRadius: 0.30,
+    wheelRadius: 0.248,
     wheelWidth: 0.20,
     paintColor: vm.Vector4(0.75, 0.15, 0.12, 1.0), // красный
+    modelId: 'hatchback',
   );
 
-  static final pickup = VehicleDimensions(
-    bodyWidth: 1.9,
+  static final suv = VehicleDimensions(
+    bodyWidth: 2.11,
     chassisHeight: 0.75,
-    bodyLength: 5.2, // длиннее седана — под кабину + грузовой отсек
+    bodyLength: 4.21,
     cabinHeight: 0.65,
-    cabinLength: 1.6,
-    cabinWidth: 1.9 * 0.85,
-    cabinZOffset: 1.5, // кабина у носа, кузов — вся корма
-    wheelRadius: 0.36,
-    wheelWidth: 0.24,
-    cargoBedLength: 2.5,
+    cabinLength: 2.4,
+    cabinWidth: 2.11 * 0.86,
+    cabinZOffset: -0.2,
+    wheelRadius: 0.327,
+    wheelWidth: 0.26,
     paintColor: vm.Vector4(0.35, 0.36, 0.34, 1.0), // защитный хаки
+    modelId: 'suv',
   );
 
-  /// Тот же силуэт, что и седан — только цвет; светобалка на крыше
-  /// добавляется отдельно самой полицейской системой (см.
-  /// lib/police/police_system.dart), не частью базовой геометрии машины.
-  static final police = VehicleDimensions(
-    bodyWidth: 1.8,
-    chassisHeight: 0.65,
-    bodyLength: 4.4,
-    cabinHeight: 0.62,
-    cabinLength: 2.3,
-    cabinWidth: 1.8 * 0.86,
+  static final sports = VehicleDimensions(
+    bodyWidth: 1.87,
+    chassisHeight: 0.5,
+    bodyLength: 3.93,
+    cabinHeight: 0.5,
+    cabinLength: 1.8,
+    cabinWidth: 1.87 * 0.8,
+    cabinZOffset: -0.3,
+    wheelRadius: 0.28,
+    wheelWidth: 0.24,
+    paintColor: vm.Vector4(0.85, 0.85, 0.88, 1.0),
+    modelId: 'sports',
+  );
+
+  static final sports2 = VehicleDimensions(
+    bodyWidth: 1.81,
+    chassisHeight: 0.5,
+    bodyLength: 3.97,
+    cabinHeight: 0.5,
+    cabinLength: 1.8,
+    cabinWidth: 1.81 * 0.8,
+    cabinZOffset: -0.3,
+    wheelRadius: 0.26,
+    wheelWidth: 0.24,
+    paintColor: vm.Vector4(0.9, 0.4, 0.05, 1.0), // оранжевый
+    modelId: 'sports2',
+  );
+
+  /// Такси — цвет фирменный, перекраска (withPaint) на модели не действует.
+  static final taxi = VehicleDimensions(
+    bodyWidth: 1.81,
+    chassisHeight: 0.6,
+    bodyLength: 4.22,
+    cabinHeight: 0.55,
+    cabinLength: 2.2,
+    cabinWidth: 1.81 * 0.86,
     cabinZOffset: -0.35,
-    wheelRadius: 0.33,
+    wheelRadius: 0.262,
+    wheelWidth: 0.22,
+    paintColor: vm.Vector4(0.95, 0.75, 0.05, 1.0), // жёлтый
+    modelId: 'taxi',
+  );
+
+  /// Мигалка у модели своя (материалы Siren_*, мигают через
+  /// VehicleModels.updateSirens); без модели полицейская система ставит
+  /// светобалку сама (см. lib/police/police_system.dart).
+  static final police = VehicleDimensions(
+    bodyWidth: 1.78,
+    chassisHeight: 0.6,
+    bodyLength: 3.73,
+    cabinHeight: 0.55,
+    cabinLength: 2.0,
+    cabinWidth: 1.78 * 0.86,
+    cabinZOffset: -0.3,
+    wheelRadius: 0.275,
     wheelWidth: 0.22,
     paintColor: vm.Vector4(0.92, 0.92, 0.94, 1.0), // белый кузов
+    modelId: 'police',
   );
+
+  /// Машины с моделью для трафика (полиция — отдельно).
+  static List<VehicleDimensions> get civilian => [sedan, hatchback, suv, sports, sports2, taxi];
 }
 
 /// Процедурный плейсхолдер машины — низкий кузов + кабина сверху (сдвиг
@@ -170,7 +225,7 @@ Future<BuiltVehicle> buildPlaceholderSedan() =>
 
 /// Запасные числа вождения — если [vehicleId] не задан или записи с таким
 /// id нет в assets/data/vehicles.json (сейчас там есть только car_sedan_01
-/// — у хэтчбека/пикапа своих записей ещё нет, они пока decorative-only и
+/// — у остальных типов своих записей ещё нет, они пока decorative-only и
 /// вообще не проезжают через VehicleControllerComponent).
 const fallbackVehicleSpec = VehicleSpec(
   maxSpeedKmh: 200.0, // было 165 — см. PROGRESS.md
@@ -237,11 +292,7 @@ BuiltVehicle buildVehicleWithSpec(
 
 /// Общий материал целых фар всех машин (лениво — материалы создаются
 /// только после инициализации движка).
-final PhysicallyBasedMaterial _headlightMaterial = PhysicallyBasedMaterial()
-  ..baseColorFactor = vm.Vector4(1.0, 0.98, 0.85, 1.0)
-  ..emissiveFactor = vm.Vector4(1.0, 0.95, 0.7, 1.0)
-  ..emissiveStrength = _headlightDayStrength
-  ..roughnessFactor = 0.3;
+PhysicallyBasedMaterial get _headlightMaterial => VehicleModels.headlightMaterial;
 
 const double _headlightDayStrength = 2.0;
 const double _headlightNightStrength = 9.0;
@@ -251,6 +302,8 @@ const double _headlightNightStrength = 9.0;
 void setHeadlightsGlow(double nightFactor) {
   _headlightMaterial.emissiveStrength =
       _headlightDayStrength + (_headlightNightStrength - _headlightDayStrength) * nightFactor;
+  // Габариты сзади ночью горят заметно, днём едва тлеют.
+  VehicleModels.tailLightMaterial.emissiveStrength = 0.6 + 3.4 * nightFactor;
 }
 
 /// Чисто декоративная машина (без контроллера/повреждений) — для "фонового"
@@ -264,6 +317,15 @@ Node buildStaticVehicleVisual(VehicleDimensions dims) {
 }
 
 void _addWheels(Node node, VehicleDimensions dims) {
+  final models = VehicleModels.instance;
+  final modelId = dims.modelId;
+  if (models != null && modelId != null && models.has(modelId)) {
+    final wheels = models.wheels(modelId);
+    wheels.forEach(node.add);
+    final wheelbase = wheels.length == 3 ? (wheels[0].position.z - wheels[2].position.z).abs() : 2.5;
+    node.addComponent(WheelSpinComponent(wheels, wheelRadius: dims.wheelRadius, wheelbase: wheelbase));
+    return;
+  }
   final wheelMaterial = PhysicallyBasedMaterial()
     ..baseColorFactor = vm.Vector4(0.05, 0.05, 0.05, 1.0)
     ..roughnessFactor = 0.9;
@@ -288,9 +350,14 @@ void _addWheels(Node node, VehicleDimensions dims) {
   }
 }
 
-/// Кузов+кабина+фары(+кузов пикапа) под один [DamageLevel]. Колёса не
+/// Кузов под один [DamageLevel] — из модели или из кубов. Колёса не
 /// варьируются по повреждениям — строятся отдельно в [_addWheels].
 Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
+  final models = VehicleModels.instance;
+  final modelId = dims.modelId;
+  if (models != null && modelId != null && models.has(modelId)) {
+    return models.body(modelId, level, dims.paintColor);
+  }
   final variant = Node();
 
   // У pristine — паспортный цвет архетипа; damaged/wrecked одинаково темнее
@@ -343,31 +410,6 @@ Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
       dims.cabinZOffset,
     );
   variant.add(cabin);
-
-  // Грузовой отсек пикапа — открытый низкий кузов позади кабины (только
-  // когда cargoBedLength > 0, см. VehicleArchetype.pickup). Не настоящий
-  // короб со стенками — плоское дно чуть темнее кузова, читается как
-  // "грузовая площадка" в силуэте, не более детально (тот же уровень
-  // условности, что и остальная процедурная геометрия).
-  if (dims.cargoBedLength > 0) {
-    final bedMaterial = PhysicallyBasedMaterial()
-      ..baseColorFactor = vm.Vector4(
-        paintColor.x * 0.7,
-        paintColor.y * 0.7,
-        paintColor.z * 0.7,
-        1.0,
-      )
-      ..metallicFactor = 0.4
-      ..roughnessFactor = 0.6;
-    final bedZ = dims.cabinZOffset - dims.cabinLength / 2 - dims.cargoBedLength / 2;
-    final bed = Node(
-      mesh: Mesh(
-        CuboidGeometry(vm.Vector3(dims.bodyWidth * 0.92, dims.chassisHeight * 0.3, dims.cargoBedLength)),
-        bedMaterial,
-      ),
-    )..position = vm.Vector3(0, dims.wheelRadius + dims.chassisHeight + dims.chassisHeight * 0.15, bedZ);
-    variant.add(bed);
-  }
 
   // Фары: damaged — левая разбита, wrecked — обе. Целые — общий на весь
   // город материал, чтобы ночью включать фары всем машинам одной правкой

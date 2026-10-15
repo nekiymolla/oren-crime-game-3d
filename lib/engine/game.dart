@@ -40,6 +40,7 @@ import '../traffic/traffic_system.dart';
 import '../police/wanted_state.dart';
 import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
+import '../vehicles/vehicle_models.dart';
 import '../vehicles/vehicle_spec.dart';
 import '../weapons/player_shooting.dart';
 import '../weapons/weapon_config.dart';
@@ -160,6 +161,9 @@ class Game {
   /// В этом кадре был выстрел — модель игрока дёргает отдачей.
   bool _firedThisFrame = false;
 
+  /// Часы мигалок патрульных машин.
+  double _sirenSeconds = 0.0;
+
   /// Отладочный слой дорожного графа (только при [debugShowRoadGraph]).
   Node? _roadGraphDebugNode;
 
@@ -254,6 +258,12 @@ class Game {
     // Раньше всего остального: пресет задаёт и параметры света/неба/камеры,
     // которые строятся ниже по этому же методу, и размер населения/деревьев.
     qualityPresets = await loadQualityPresets();
+    try {
+      await VehicleModels.load();
+    } catch (error) {
+      // ignore: avoid_print
+      print('VehicleModels: модели машин не загрузились ($error) — кубы');
+    }
     try {
       _characters = await CharacterLibrary.load();
     } catch (error) {
@@ -411,7 +421,7 @@ class Game {
     final parkedHatchback = buildStaticVehicleVisual(VehicleArchetype.hatchback)
       ..position = worldConfig.playerSpawnPosition + vm.Vector3(-6, 0, -3)
       ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.pi * 0.15);
-    final parkedPickup = buildStaticVehicleVisual(VehicleArchetype.pickup)
+    final parkedPickup = buildStaticVehicleVisual(VehicleArchetype.suv)
       ..position = worldConfig.playerSpawnPosition + vm.Vector3(-8, 0, 6)
       ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4);
     scene.add(parkedHatchback);
@@ -1021,6 +1031,8 @@ class Game {
     );
 
     _firedThisFrame = false;
+    _sirenSeconds += deltaSeconds;
+    VehicleModels.updateSirens(_sirenSeconds);
     _updateWeapon(deltaSeconds, isDriving: isDriving);
     _updatePlayerModel(deltaSeconds, isDriving: isDriving);
     _updateWeather(deltaSeconds);

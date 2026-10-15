@@ -15,3 +15,11 @@ Witch) poly.pizza помечает как CC-BY 3.0, поэтому указыв
 Подготовка: `tools/assets/fetch_polypizza.py` (скачать бандл) ->
 `tools/assets/prepare_characters.mjs` (материалы в цвета вершин, один
 draw call, отбор анимаций).
+
+## Машины — assets/models/vehicles/
+
+Quaternius — Cars Bundle (https://poly.pizza/bundle/Cars-Bundle-FE5IWe6OMk).
+Лицензия: CC0 1.0.
+
+Подготовка: `tools/assets/prepare_vehicles.mjs` (колёса с опорой в центре,
+роли материалов Paint/Glass/Headlights/TailLights/Siren_*, перед на +Z игры).

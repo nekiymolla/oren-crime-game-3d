@@ -181,7 +181,7 @@ class TrafficSystem {
   }
 
   VehicleDimensions _randomLook() {
-    final archetypes = [VehicleArchetype.sedan, VehicleArchetype.hatchback, VehicleArchetype.pickup];
+    final archetypes = VehicleArchetype.civilian;
     final base = archetypes[_random.nextInt(archetypes.length)];
     return base.withPaint(_paints[_random.nextInt(_paints.length)]);
   }

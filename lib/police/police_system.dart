@@ -8,6 +8,7 @@ import '../vehicles/vehicle_spec.dart';
 import '../world/road_graph.dart';
 import 'police_car.dart';
 import '../characters/character_library.dart';
+import '../vehicles/vehicle_models.dart';
 import 'police_officers.dart';
 import 'road_pathfinding.dart';
 import 'wanted_state.dart';
@@ -282,7 +283,8 @@ class PoliceSystem {
 
     final vehicle = buildVehicleWithSpec(VehicleArchetype.police, _policeSpec, attachPlayerInput: false);
     vehicle.node.position = spawnNode.toVector3();
-    vehicle.node.add(_buildLightBar());
+    // У модели мигалка своя (VehicleModels.updateSirens).
+    if (!(VehicleModels.instance?.has('police') ?? false)) vehicle.node.add(_buildLightBar());
     scene.add(vehicle.node);
     return _PoliceUnit(vehicle, _nextUnitId++);
   }
