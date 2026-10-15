@@ -30,6 +30,22 @@ void main() {
     expect(dead.health, PlayerHealth.maxHealth);
   });
 
+  test('бронежилет принимает урон первым, не регенерирует, теряется при возрождении', () {
+    final health = PlayerHealth()..addArmor(30);
+    health.takeDamage(20);
+    expect(health.armor, 10);
+    expect(health.health, 100);
+    health.takeDamage(25); // 10 в броню, 15 в здоровье
+    expect(health.armor, 0);
+    expect(health.health, 85);
+    health.update(100);
+    expect(health.armor, 0);
+    health.addArmor(500);
+    expect(health.armor, PlayerHealth.maxArmor);
+    health.reset();
+    expect(health.armor, 0);
+  });
+
   test('вспышка урона гаснет', () {
     final health = PlayerHealth()..takeDamage(10);
     health.update(1.0);

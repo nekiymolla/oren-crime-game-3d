@@ -17,7 +17,10 @@ import '../controls/weapon_controls.dart';
 import 'arrest_banner.dart';
 import 'clock_hud.dart';
 import 'health_hud.dart';
+import 'compass_hud.dart';
 import 'money_hud.dart';
+import 'radar.dart';
+import 'radar_math.dart';
 import 'wanted_stars.dart';
 import 'weapon_hud.dart';
 
@@ -43,9 +46,15 @@ class _GameHudState extends State<GameHud> {
   final Game game = Game(debugShowRoadGraph: kDebugMode);
   bool _ready = false;
 
+  /// Карта района для радара; null — не загрузилась (радар без подложки).
+  Minimap? _minimap;
+
   @override
   void initState() {
     super.initState();
+    Minimap.load().then((map) {
+      if (mounted) setState(() => _minimap = map);
+    }, onError: (Object _) {});
     game.load().then((_) {
       if (mounted) setState(() => _ready = true);
     });
@@ -79,7 +88,8 @@ class _GameHudState extends State<GameHud> {
       child: OrientationBuilder(
         builder: (context, orientation) {
           final isPortrait = orientation == Orientation.portrait;
-          final bottomInset = MediaQuery.of(context).padding.bottom;
+          final padding = MediaQuery.of(context).padding;
+          final bottomInset = padding.bottom;
           final controlsBottom = bottomInset + (isPortrait ? 24 : 16);
           // Прозрачный Material — тексты HUD без него рисуются стилем
           // "нет Material-предка" (жёлтое двойное подчёркивание).
@@ -147,24 +157,47 @@ class _GameHudState extends State<GameHud> {
                     child: AmmoCounter(game: game),
                   ),
                 ],
+                // Навигация и состояние (в духе GTA IV): в горизонтальном
+                // режиме — круглый радар слева сверху (обод: слева
+                // бронежилет, справа здоровье), в вертикальном — плоский
+                // компас во всю ширину с теми же полосами по краям.
+                if (isPortrait)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    top: padding.top + 6,
+                    child: CompassHud(game: game),
+                  )
+                else
+                  Positioned(
+                    left: padding.left + 12,
+                    top: padding.top + 10,
+                    child: RadarHud(game: game, minimap: _minimap),
+                  ),
                 Positioned(
-                  left: 24,
-                  top: MediaQuery.of(context).padding.top + 16,
+                  left: isPortrait ? 24 : padding.left + 12 + 150 + 12,
+                  top: padding.top + (isPortrait ? 44 : 14),
                   child: VehicleInteractButton(
                     game: game,
                     onToggle: _toggleVehicle,
                   ),
                 ),
                 Positioned(
-                  right: 24,
-                  top: MediaQuery.of(context).padding.top + 16,
+                  right: padding.right + 24,
+                  top: padding.top + (isPortrait ? 44 : 14),
                   child: const WantedStars(),
                 ),
-                // Часы — по центру сверху, под "чёлкой"/Dynamic Island.
+                Positioned(
+                  right: padding.right + 24,
+                  top: padding.top + (isPortrait ? 72 : 42),
+                  child: MoneyHud(wallet: game.wallet),
+                ),
+                // Часы — по центру: в портрете под компасом, в ландшафте
+                // сверху.
                 Positioned(
                   left: 0,
                   right: 0,
-                  top: MediaQuery.of(context).padding.top + 8,
+                  top: padding.top + (isPortrait ? 40 : 8),
                   child: Center(
                     child: ClockHud(clock: game.clock, weather: game.weather),
                   ),
@@ -176,15 +209,10 @@ class _GameHudState extends State<GameHud> {
                 if (!kReleaseMode)
                   Positioned(
                     right: 24,
-                    top: MediaQuery.of(context).padding.top + 104,
+                    top: padding.top + (isPortrait ? 130 : 92),
                     child: QualityDebugPanel(game: game),
                   ),
                 Positioned.fill(child: HealthHud(game: game)),
-                Positioned(
-                  right: 24,
-                  top: MediaQuery.of(context).padding.top + 56,
-                  child: MoneyHud(wallet: game.wallet),
-                ),
                 // Кнопка дома — по центру над полосой управления, у маркера.
                 Positioned(
                   left: 0,

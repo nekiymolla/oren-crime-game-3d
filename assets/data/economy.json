@@ -4,7 +4,7 @@
   "hospital": { "base": 150, "percent": 0.1 },
   "arrest": { "base": 100, "percent": 0.05 },
   "pedestrianDrop": { "min": 15, "max": 120 },
-  "officerDrop": { "min": 60, "max": 220, "ammo": 8 },
+  "officerDrop": { "min": 60, "max": 220, "ammo": 8, "armor": 50, "armorChance": 0.4 },
   "pickupLifetimeSeconds": 60.0,
   "pickupRadius": 1.4
 }

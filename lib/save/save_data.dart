@@ -11,6 +11,7 @@ class SaveData {
     required this.position,
     required this.yaw,
     required this.health,
+    this.armor = 0.0,
     required this.weaponId,
     required this.ammoInMagazine,
     required this.reserveAmmo,
@@ -22,13 +23,16 @@ class SaveData {
 
   /// Текущая версия формата. Поднимать при изменении полей и добавлять
   /// шаг в [migrateSave].
-  static const int currentVersion = 1;
+  ///
+  /// v2 (15.10.2026): бронежилет `player.armor`.
+  static const int currentVersion = 2;
 
   final int money;
   final List<String> ownedProperties;
   final vm.Vector3 position;
   final double yaw;
   final double health;
+  final double armor;
   final String weaponId;
   final int ammoInMagazine;
   final int reserveAmmo;
@@ -48,6 +52,7 @@ class SaveData {
       'position': [position.x, position.y, position.z],
       'yaw': yaw,
       'health': health,
+      'armor': armor,
     },
     'money': money,
     'properties': ownedProperties,
@@ -73,6 +78,7 @@ class SaveData {
       position: vm.Vector3(position[0].toDouble(), position[1].toDouble(), position[2].toDouble()),
       yaw: (player['yaw'] as num).toDouble(),
       health: (player['health'] as num).toDouble(),
+      armor: (player['armor'] as num).toDouble(),
       weaponId: weapon['id'] as String,
       ammoInMagazine: weapon['ammoInMagazine'] as int,
       reserveAmmo: weapon['reserveAmmo'] as int,
@@ -84,12 +90,20 @@ class SaveData {
   }
 }
 
-/// Приводит сохранение любой известной версии к [SaveData.currentVersion].
-/// Сейчас версия одна; при появлении второй здесь будет шаг
-/// `if (version == 1) { ...; version = 2; }`. Неизвестная (будущая)
-/// версия — null: такое сохранение не трогаем.
+/// Приводит сохранение любой известной версии к [SaveData.currentVersion]
+/// по шагу за раз. Неизвестная (будущая) версия — null: такое
+/// сохранение не трогаем.
 Map<String, dynamic>? migrateSave(Map<String, dynamic> json) {
-  final version = json['version'];
+  var version = json['version'];
   if (version is! int || version < 1 || version > SaveData.currentVersion) return null;
-  return json;
+  final migrated = Map<String, dynamic>.of(json);
+  if (version == 1) {
+    // v1 -> v2: бронежилета ещё не было.
+    final player = Map<String, dynamic>.of(migrated['player'] as Map<String, dynamic>);
+    player['armor'] = 0.0;
+    migrated['player'] = player;
+    version = 2;
+  }
+  migrated['version'] = version;
+  return migrated;
 }

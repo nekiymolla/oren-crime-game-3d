@@ -93,17 +93,26 @@ class Penalty {
   int amountFor(int balance) => base + (balance * percent).round();
 }
 
-/// Сколько выпадает с убитого: случайно в [min]..[max] рублей и [ammo]
-/// патронов.
+/// Сколько выпадает с убитого: случайно в [min]..[max] рублей, [ammo]
+/// патронов и с шансом [armorChance] — бронежилет на [armor] единиц.
 class Drop {
-  const Drop({required this.min, required this.max, this.ammo = 0});
+  const Drop({required this.min, required this.max, this.ammo = 0, this.armor = 0, this.armorChance = 0.0});
 
-  factory Drop.fromJson(Map<String, dynamic> json) =>
-      Drop(min: json['min'] as int, max: json['max'] as int, ammo: json['ammo'] as int? ?? 0);
+  factory Drop.fromJson(Map<String, dynamic> json) => Drop(
+    min: json['min'] as int,
+    max: json['max'] as int,
+    ammo: json['ammo'] as int? ?? 0,
+    armor: json['armor'] as int? ?? 0,
+    armorChance: (json['armorChance'] as num?)?.toDouble() ?? 0.0,
+  );
 
   final int min;
   final int max;
   final int ammo;
+  final int armor;
+  final double armorChance;
+
+  bool rollArmor(math.Random random) => armor > 0 && random.nextDouble() < armorChance;
 
   int rollMoney(math.Random random) => min + random.nextInt(max - min + 1);
 }

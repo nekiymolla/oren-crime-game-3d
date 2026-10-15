@@ -5,9 +5,9 @@ import '../../engine/game.dart';
 import '../../player/death_state.dart';
 import '../../player/player_health.dart';
 
-/// Полоска здоровья игрока и красная вспышка по краям экрана при
-/// попадании. Опрашивает [Game.playerHealth] своим Ticker'ом, как
-/// WantedStars.
+/// Красная вспышка по краям экрана при попадании. Сами полосы здоровья
+/// и бронежилета — в радаре/компасе (radar.dart, compass_hud.dart).
+/// Опрашивает [Game.playerHealth] своим Ticker'ом, как WantedStars.
 class HealthHud extends StatefulWidget {
   const HealthHud({super.key, required this.game});
 
@@ -45,8 +45,6 @@ class _HealthHudState extends State<HealthHud> with SingleTickerProviderStateMix
 
   @override
   Widget build(BuildContext context) {
-    final fraction = (_health / PlayerHealth.maxHealth).clamp(0.0, 1.0);
-    final barColor = fraction > 0.5 ? Colors.greenAccent : (fraction > 0.25 ? Colors.amber : Colors.redAccent);
     return IgnorePointer(
       child: Stack(
         fit: StackFit.expand,
@@ -61,27 +59,6 @@ class _HealthHudState extends State<HealthHud> with SingleTickerProviderStateMix
                 ),
               ),
             ),
-          Positioned(
-            right: 24,
-            top: MediaQuery.of(context).padding.top + 44,
-            child: Container(
-              width: 96,
-              height: 8,
-              decoration: BoxDecoration(
-                color: Colors.black45,
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: Colors.white24),
-              ),
-              alignment: Alignment.centerLeft,
-              child: FractionallySizedBox(
-                widthFactor: fraction,
-                heightFactor: 1.0,
-                child: DecoratedBox(
-                  decoration: BoxDecoration(color: barColor, borderRadius: BorderRadius.circular(4)),
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );

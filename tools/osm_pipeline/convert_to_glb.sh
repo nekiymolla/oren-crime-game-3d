@@ -60,6 +60,9 @@ rm -rf "$CHUNKS_DIR"
 node "$SCRIPT_DIR/grid_split.mjs" "$RECENTERED_FILE" "$CHUNKS_DIR" "$CELL_SIZE_METERS"
 # Окна домов светятся ночью, дороги мокнут в дождь — помечаем их материалы (см. скрипт).
 node "$SCRIPT_DIR/mark_night_materials.mjs" "$CHUNKS_DIR"
+# Карта района для радара/компаса HUD — вид сверху по той же геометрии.
+node "$SCRIPT_DIR/render_minimap.mjs" "$CHUNKS_DIR" \
+  "$SCRIPT_DIR/../../assets/data/minimap.png" "$SCRIPT_DIR/../../assets/data/minimap.json"
 rm "$RECENTERED_FILE"
 
 # Дорожный граф (highway=* из сырого .osm) для будущих NPC/трафика/полиции

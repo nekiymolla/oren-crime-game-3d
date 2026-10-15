@@ -5,7 +5,8 @@ import 'package:vector_math/vector_math.dart' as vm;
 
 import 'pickups.dart';
 
-/// Рисует [PickupField]: пачки денег (зелёные) и патроны (латунь) —
+/// Рисует [PickupField]: пачки денег (зелёные), патроны (латунь) и
+/// бронежилеты (синие) —
 /// покачиваются и крутятся, чтобы их было видно на траве и асфальте.
 /// Один InstancedMesh на фиксированный пул; свободные места спрятаны.
 class PickupsView {
@@ -30,6 +31,7 @@ class PickupsView {
 
   static final vm.Vector4 _moneyColor = vm.Vector4(0.2, 0.75, 0.3, 1.0);
   static final vm.Vector4 _ammoColor = vm.Vector4(0.85, 0.65, 0.2, 1.0);
+  static final vm.Vector4 _armorColor = vm.Vector4(0.25, 0.5, 1.0, 1.0);
   static final vm.Matrix4 _hidden = vm.Matrix4.compose(vm.Vector3(0, -50, 0), vm.Quaternion.identity(), vm.Vector3.all(0.01));
 
   Node buildNode() => Node()..addComponent(InstancedMeshComponent(_mesh));
@@ -45,7 +47,7 @@ class PickupsView {
       final phase = i * 1.7;
       final lift = 0.35 + 0.08 * math.sin(_time * 3.0 + phase);
       _mesh
-        ..setInstanceColor(i, item.money > 0 ? _moneyColor : _ammoColor)
+        ..setInstanceColor(i, item.money > 0 ? _moneyColor : (item.armor > 0 ? _armorColor : _ammoColor))
         ..setInstanceTransform(
           i,
           vm.Matrix4.compose(

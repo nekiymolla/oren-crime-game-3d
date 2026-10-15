@@ -109,9 +109,11 @@ class _FpsOverlayState extends State<FpsOverlay> {
     return Stack(
       children: [
         widget.child,
+        // Над джойстиком, а не сверху: верхний левый угол занят радаром
+        // (ландшафт) и компасом (портрет).
         Positioned(
-          top: MediaQuery.of(context).padding.top + 8,
-          left: 8,
+          bottom: MediaQuery.of(context).padding.bottom + 200,
+          left: MediaQuery.of(context).padding.left + 8,
           child: IgnorePointer(
             child: Container(
               padding: const EdgeInsets.all(8),

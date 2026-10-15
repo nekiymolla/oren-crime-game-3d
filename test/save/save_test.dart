@@ -14,6 +14,7 @@ SaveData _sample() => SaveData(
   position: vm.Vector3(9.5, 0, -2),
   yaw: 1.25,
   health: 73.5,
+  armor: 40,
   weaponId: 'pistol_makarov',
   ammoInMagazine: 5,
   reserveAmmo: 40,
@@ -33,12 +34,22 @@ void main() {
     expect(back.position, vm.Vector3(9.5, 0, -2));
     expect(back.yaw, 1.25);
     expect(back.health, 73.5);
+    expect(back.armor, 40);
     expect(back.ammoInMagazine, 5);
     expect(back.reserveAmmo, 40);
     expect(back.clockHours, 21.5);
     expect(back.dayOfYear, 290);
     expect(back.weather, 'rain');
     expect(back.qualityPreset, 'medium');
+  });
+
+  test('сохранение v1 (без бронежилета) читается, броня — 0', () {
+    final v1 = _sample().toJson();
+    v1['version'] = 1;
+    (v1['player'] as Map<String, dynamic>).remove('armor');
+    final loaded = SaveData.fromJson(jsonDecode(jsonEncode(v1)) as Map<String, dynamic>)!;
+    expect(loaded.armor, 0.0);
+    expect(loaded.money, 1234);
   });
 
   test('сохранение из будущей версии и без версии не читается', () {

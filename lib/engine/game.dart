@@ -9,6 +9,7 @@ import '../core/input/input_state.dart';
 import '../economy/pickups.dart';
 import '../economy/pickups_view.dart';
 import '../economy/wallet.dart';
+import 'hud_info.dart';
 import '../core/quality_settings.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/character_collision_field.dart';
@@ -460,6 +461,7 @@ class Game {
     position: playerNode.globalTransform.getTranslation(),
     yaw: _movement?.motion.yaw ?? 0.0,
     health: playerHealth.health,
+    armor: playerHealth.armor,
     weaponId: weapon.config.id,
     ammoInMagazine: weapon.ammoInMagazine,
     reserveAmmo: weapon.reserveAmmo,
@@ -476,7 +478,9 @@ class Game {
       ..addAll(save.ownedProperties.where((id) => properties.properties.any((p) => p.id == id)));
     playerNode.position = save.position;
     _movement?.teleport(save.position, yaw: save.yaw);
-    playerHealth.health = save.health.clamp(1.0, PlayerHealth.maxHealth);
+    playerHealth
+      ..health = save.health.clamp(1.0, PlayerHealth.maxHealth)
+      ..armor = save.armor.clamp(0.0, PlayerHealth.maxArmor);
     if (save.weaponId == weapon.config.id) {
       weapon
         ..ammoInMagazine = save.ammoInMagazine.clamp(0, weapon.config.magazineSize)
@@ -907,6 +911,7 @@ class Game {
     final money = drop.rollMoney(_random);
     if (money > 0) _pickups.drop(Pickup(position: feet + vm.Vector3(0.4, 0, 0), money: money));
     if (drop.ammo > 0) _pickups.drop(Pickup(position: feet + vm.Vector3(-0.4, 0, 0.3), money: 0, ammo: drop.ammo));
+    if (drop.rollArmor(_random)) _pickups.drop(Pickup(position: feet + vm.Vector3(0, 0, -0.5), money: 0, armor: drop.armor));
   }
 
   /// Добыча на земле: стареет, подбирается проходом рядом (пешком или на
@@ -916,6 +921,7 @@ class Game {
     for (final item in collected) {
       wallet.earn(item.money, TransactionReason.pickup);
       weapon.reserveAmmo += item.ammo;
+      playerHealth.addArmor(item.armor.toDouble());
       audio.pickup();
     }
     _pickupsView.update(deltaSeconds);
@@ -1133,6 +1139,38 @@ class Game {
     _setPlayerLying(false);
     _movement?.teleport(_respawnPosition);
     cameraController.followTarget = playerNode;
+  }
+
+  /// Для радара и компаса: курс камеры (экран "вверх" — её взгляд).
+  double get cameraYaw => cameraController.yaw;
+
+  /// Курс игрока или его машины — стрелка в центре радара.
+  double get playerHeading => gameModeState.mode == ControlMode.driving
+      ? vehicle.controller.heading
+      : (_movement?.motion.yaw ?? 0.0);
+
+  /// Скорость — радар отдаляется на ходу.
+  double get playerSpeed => gameModeState.mode == ControlMode.driving
+      ? vehicle.controller.speed
+      : (_movement?.horizontalSpeed ?? 0.0);
+
+  /// Метки для радара/компаса: дома, полиция, добыча.
+  void collectBlips(List<HudBlip> out) {
+    for (final property in properties.properties) {
+      final kind = properties.isOwned(property) ? BlipKind.houseOwned : BlipKind.houseForSale;
+      out.add(HudBlip(kind, property.entryPoint.x, property.entryPoint.z));
+    }
+    for (final car in policeSystem.unitNodes) {
+      final p = car.globalTransform.getTranslation();
+      out.add(HudBlip(BlipKind.policeCar, p.x, p.z));
+    }
+    for (final p in policeSystem.officers.alivePositions) {
+      out.add(HudBlip(BlipKind.officer, p.x, p.z));
+    }
+    for (final item in _pickups.items) {
+      final kind = item.money > 0 ? BlipKind.money : (item.armor > 0 ? BlipKind.armor : BlipKind.ammo);
+      out.add(HudBlip(kind, item.position.x, item.position.z));
+    }
   }
 
   /// Где появляется игрок после смерти и ареста: у своего дома, если он

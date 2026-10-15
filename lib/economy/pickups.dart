@@ -1,12 +1,14 @@
 import 'package:vector_math/vector_math.dart' as vm;
 
-/// Лежащая на земле добыча: деньги и/или патроны. Исчезает через время.
+/// Лежащая на земле добыча: деньги, патроны или бронежилет. Исчезает
+/// через время.
 class Pickup {
-  Pickup({required this.position, required this.money, this.ammo = 0});
+  Pickup({required this.position, required this.money, this.ammo = 0, this.armor = 0});
 
   final vm.Vector3 position;
   final int money;
   final int ammo;
+  final int armor;
   double ageSeconds = 0.0;
 }
 

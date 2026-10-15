@@ -1,10 +1,15 @@
 import 'dart:math' as math;
 
-/// Здоровье игрока. Чистая логика (проверена тестами): урон, смерть,
-/// медленная регенерация после передышки — на мобильном экране без
-/// аптечек иначе любая перестрелка заканчивалась бы смертью.
+/// Здоровье и бронежилет игрока. Чистая логика (проверена тестами):
+/// урон сначала принимает бронежилет, потом здоровье; смерть; медленная
+/// регенерация здоровья после передышки — на мобильном экране без
+/// аптечек иначе любая перестрелка заканчивалась бы смертью. Бронежилет
+/// сам не восстанавливается — только подобранный.
 class PlayerHealth {
   static const double maxHealth = 100.0;
+  static const double maxArmor = 100.0;
+
+  double armor = 0.0;
 
   /// Через сколько секунд без урона начинается регенерация и как быстро.
   static const double regenDelaySeconds = 8.0;
@@ -22,7 +27,9 @@ class PlayerHealth {
   /// Возвращает true ровно когда этот урон убил.
   bool takeDamage(double amount) {
     if (isDead || amount <= 0.0) return false;
-    health = math.max(0.0, health - amount);
+    final absorbed = math.min(armor, amount);
+    armor -= absorbed;
+    health = math.max(0.0, health - (amount - absorbed));
     _secondsSinceDamage = 0.0;
     _flash = math.min(1.0, _flash + 0.35 + amount / 40.0);
     return isDead;
@@ -37,7 +44,12 @@ class PlayerHealth {
     }
   }
 
+  /// Подобрал бронежилет: прибавка, не выше [maxArmor].
+  void addArmor(double amount) => armor = math.min(maxArmor, armor + amount);
+
+  /// Возрождение: здоровье полное, бронежилет потерян.
   void reset() {
+    armor = 0.0;
     health = maxHealth;
     _secondsSinceDamage = double.infinity;
     _flash = 0.0;
