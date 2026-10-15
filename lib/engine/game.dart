@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import '../audio/audio_system.dart';
 import '../core/game_mode.dart';
 import '../core/input/input_state.dart';
 import '../economy/pickups.dart';
@@ -196,6 +197,15 @@ class Game {
   /// Недвижимость (lib/properties/): что куплено, где возрождаться.
   late final PropertySystem properties;
   late final PropertyMarkersView _propertyMarkers;
+
+  /// Звук (lib/audio/).
+  late final AudioSystem audio;
+
+  /// Машины, к которым уже подцеплен звук удара.
+  final Set<BuiltVehicle> _crashHooked = {};
+
+  /// Шла ли перезарядка в прошлом кадре — щелчок звучит на её начале.
+  bool _wasReloading = false;
 
   /// Сохранение (lib/save/): файл в документах приложения.
   final SaveStore _saveStore = SaveStore();
@@ -435,6 +445,9 @@ class Game {
     _weaponEffects = WeaponEffectsView();
     scene.add(_weaponEffects.buildNode());
 
+    audio = AudioSystem(scene);
+    await audio.load();
+
     // Последним: сохранение перекрывает стартовые значения всего выше.
     final save = await _saveStore.read();
     if (save != null) _applySave(save);
@@ -483,6 +496,7 @@ class Game {
     if (!(propertyInteraction?.canSave ?? false)) return false;
     await _saveStore.write(_snapshot());
     lastSavedAt = DateTime.now();
+    audio.saved();
     return true;
   }
 
@@ -607,6 +621,7 @@ class Game {
       _parkPlayerCar(vehicle);
       vehicle = target.own!;
     }
+    _hookCrashSound(vehicle);
     gameModeState
       ..mode = ControlMode.driving
       ..activeVehicle = vehicle.controller;
@@ -633,6 +648,16 @@ class Game {
     final left = vm.Vector3(math.cos(car.heading), 0, -math.sin(car.heading));
     pedestrians.spawnFleeingDriver(car.position + left * 1.6, playerNode.globalTransform.getTranslation());
     wantedSystem.reportMinorCrime();
+  }
+
+  /// Звук удара для машины игрока — поверх обработчика повреждений.
+  void _hookCrashSound(BuiltVehicle car) {
+    if (!_crashHooked.add(car)) return;
+    final previous = car.controller.onCollision;
+    car.controller.onCollision = (impactSpeed) {
+      previous?.call(impactSpeed);
+      if (impactSpeed > 2.0) audio.crash(car.node.globalTransform.getTranslation(), impactSpeed);
+    };
   }
 
   void _parkPlayerCar(BuiltVehicle car) {
@@ -865,6 +890,10 @@ class Game {
     );
     if (shot == null) return;
     _weaponEffects.showShot(shot);
+    audio.gunshot(shot.muzzle);
+    for (final bullet in shot.bullets) {
+      if (bullet.impact == BulletImpact.world) audio.bulletImpact(bullet.end);
+    }
     wantedSystem.reportShooting(witnesses: shot.witnesses, wounded: shot.wounded, killed: shot.killed);
     for (final kill in shot.kills) {
       _dropLoot(kill.feet, kill.kind);
@@ -887,6 +916,7 @@ class Game {
     for (final item in collected) {
       wallet.earn(item.money, TransactionReason.pickup);
       weapon.reserveAmmo += item.ammo;
+      audio.pickup();
     }
     _pickupsView.update(deltaSeconds);
     _propertyMarkers.update(deltaSeconds);
@@ -953,6 +983,7 @@ class Game {
     if (caught && !isDead) _handleArrest();
     _updateCombat(deltaSeconds, trackedPosition, isDriving: isDriving);
     _updatePickups(deltaSeconds, trackedPosition);
+    _updateAudio(deltaSeconds, isDriving: isDriving);
 
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
@@ -1008,6 +1039,32 @@ class Game {
   /// постепенно), игрок телепортируется к точке спавна (условная
   /// "безопасная точка" — отдельного полицейского участка на карте пока
   /// нет). HUD показывает баннер через ArrestState (см. arrest_banner.dart).
+  void _updateAudio(double deltaSeconds, {required bool isDriving}) {
+    if (weapon.isReloading && !_wasReloading) audio.reload(playerNode.globalTransform.getTranslation());
+    _wasReloading = weapon.isReloading;
+    final params = weather.params;
+    audio.update(
+      deltaSeconds,
+      playerFeet: playerNode.globalTransform.getTranslation(),
+      playerSpeed: isDead ? 0.0 : (_movement?.horizontalSpeed ?? 0.0),
+      playerGrounded: _movement?.isGrounded ?? true,
+      vehicle: isDriving
+          ? (
+              position: vehicle.node.globalTransform.getTranslation(),
+              speed: vehicle.controller.speed,
+              maxSpeed: vehicle.controller.maxSpeed,
+              driftFactor: vehicle.controller.driftFactor,
+            )
+          : null,
+      rain: params.rain,
+      snow: params.snow,
+      wind: params.wind,
+      nightFactor: dayNight.lighting?.nightFactor ?? 0.0,
+      lightningFlash: _weatherView.lightningFlash,
+      policeCars: policeSystem.unitNodes,
+    );
+  }
+
   /// Полиция стреляет по игроку, здоровье, смерть и возрождение.
   void _updateCombat(double deltaSeconds, vm.Vector3 trackedPosition, {required bool isDriving}) {
     playerHealth.update(deltaSeconds);
@@ -1044,7 +1101,9 @@ class Game {
           witnesses: 0,
         ),
       );
+      audio.gunshot(shot.muzzle, police: true);
       if (!shot.hit) continue;
+      audio.hurt();
       // Кузов закрывает от половины пуль.
       final damage = OfficerTuning.damage * (isDriving ? 0.5 : 1.0);
       if (playerHealth.takeDamage(damage)) {
@@ -1060,6 +1119,7 @@ class Game {
     if (gameModeState.mode == ControlMode.driving) toggleVehicle();
     _deathSeconds = _deathLieSeconds;
     deathState.trigger();
+    audio.wasted();
     _setPlayerLying(true);
   }
 
@@ -1091,6 +1151,7 @@ class Game {
     final interaction = propertyInteraction;
     if (interaction == null || interaction.owned) return false;
     final bought = properties.buy(interaction.property, wallet);
+    if (bought) audio.purchase();
     // Покупку не должен отменить вылет игры — сразу автосохранение.
     if (bought) saveGame();
     return bought;
@@ -1111,6 +1172,7 @@ class Game {
   }
 
   void _handleArrest() {
+    audio.busted();
     wallet.charge(_economy.arrest.amountFor(wallet.balance), TransactionReason.arrestFine);
     wantedState.stars = 0;
     policeSystem.clearUnits();

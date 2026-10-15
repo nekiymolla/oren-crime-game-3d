@@ -128,6 +128,9 @@ class _QualityDebugPanelState extends State<QualityDebugPanel> {
         _row('time +1h', () {
           setState(() => game.clock.skipHours(1));
         }),
+        _row('sound ${_onOff(!game.audio.muted)}', () {
+          setState(() => game.audio.muted = !game.audio.muted);
+        }),
       ],
     );
   }

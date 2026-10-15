@@ -37,6 +37,7 @@ dependencies:
   flutter_scene: ^0.23.0
   vector_math: ^2.4.2
   path_provider: ^2.1.6
+  flutter_scene_soloud: ^0.1.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -60,6 +61,7 @@ flutter:
   assets:
     - flutter_scene_generated/
     - assets/data/
+    - assets/sounds/
     - assets/models/world/chunks/manifest.json
   uses-material-design: true
 

@@ -147,6 +147,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.23.0"
+  flutter_scene_soloud:
+    dependency: "direct main"
+    description:
+      name: flutter_scene_soloud
+      sha256: "45ef5d5d90eba9f9f777e260c382a3f7df0e0853a7a1d3c1265904a83f01d940"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
+  flutter_soloud:
+    dependency: transitive
+    description:
+      name: flutter_soloud
+      sha256: "9e753b54f858f988558614db82ae692dd1043fe2a446dd6187076e7d34c000b4"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.7"
   flutter_test:
     dependency: "direct dev"
     description: flutter
@@ -160,6 +176,22 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.2.0"
+  http:
+    dependency: transitive
+    description:
+      name: http
+      sha256: "87721a4a50b19c7f1d49001e51409bddc46303966ce89a65af4f4e6004896412"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.6.0"
+  http_parser:
+    dependency: transitive
+    description:
+      name: http_parser
+      sha256: "178d74305e7866013777bab2c3d8726205dc5a4dd935297175b19a23a2e66571"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.1.2"
   image:
     dependency: transitive
     description:
