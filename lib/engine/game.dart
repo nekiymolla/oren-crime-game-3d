@@ -5,6 +5,9 @@ import 'package:vector_math/vector_math.dart' as vm;
 
 import '../core/game_mode.dart';
 import '../core/input/input_state.dart';
+import '../economy/pickups.dart';
+import '../economy/pickups_view.dart';
+import '../economy/wallet.dart';
 import '../core/quality_settings.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/character_collision_field.dart';
@@ -178,6 +181,13 @@ class Game {
   static const double _deathLieSeconds = 3.5;
 
   bool get isDead => _deathSeconds > 0.0;
+
+  /// Деньги игрока (lib/economy/) — HUD показывает баланс и операции.
+  late final Wallet wallet;
+  late final EconomyConfig _economy;
+  late final PickupField _pickups;
+  late final PickupsView _pickupsView;
+  final math.Random _random = math.Random();
 
   /// С запасом покрывает весь загружаемый чанками район (~1900x1600 м, см.
   /// PROGRESS.md) — плоскость всего 2 треугольника, размер почти бесплатен,
@@ -389,6 +399,12 @@ class Game {
     // а не "куда сейчас смотрит персонаж") — мосту нужен уже готовый
     // cameraController, поэтому он добавляется последним.
     playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController, isLocked: () => isDead));
+
+    _economy = await loadEconomyConfig();
+    wallet = Wallet(_economy.startingMoney);
+    _pickups = PickupField(lifetimeSeconds: _economy.pickupLifetimeSeconds, collectRadius: _economy.pickupRadius);
+    _pickupsView = PickupsView(_pickups);
+    scene.add(_pickupsView.buildNode());
 
     final weapons = await loadWeaponCatalog();
     weapon = WeaponState(weapons.defaultWeapon);
@@ -782,6 +798,29 @@ class Game {
     if (shot == null) return;
     _weaponEffects.showShot(shot);
     wantedSystem.reportShooting(witnesses: shot.witnesses, wounded: shot.wounded, killed: shot.killed);
+    for (final kill in shot.kills) {
+      _dropLoot(kill.feet, kill.kind);
+    }
+  }
+
+  /// Добыча с убитого: деньги, а с полицейского ещё и патроны (иначе
+  /// патроны кончались бы насовсем — магазинов пока нет).
+  void _dropLoot(vm.Vector3 feet, TargetKind kind) {
+    final drop = kind == TargetKind.officer ? _economy.officerDrop : _economy.pedestrianDrop;
+    final money = drop.rollMoney(_random);
+    if (money > 0) _pickups.drop(Pickup(position: feet + vm.Vector3(0.4, 0, 0), money: money));
+    if (drop.ammo > 0) _pickups.drop(Pickup(position: feet + vm.Vector3(-0.4, 0, 0.3), money: 0, ammo: drop.ammo));
+  }
+
+  /// Добыча на земле: стареет, подбирается проходом рядом (пешком или на
+  /// машине), мёртвый не подбирает.
+  void _updatePickups(double deltaSeconds, vm.Vector3 trackedPosition) {
+    final collected = _pickups.update(deltaSeconds, isDead ? null : trackedPosition);
+    for (final item in collected) {
+      wallet.earn(item.money, TransactionReason.pickup);
+      weapon.reserveAmmo += item.ammo;
+    }
+    _pickupsView.update(deltaSeconds);
   }
 
   /// Узел, за которым сейчас "следит" мир — игрок пешком или машина за
@@ -844,6 +883,7 @@ class Game {
     );
     if (caught && !isDead) _handleArrest();
     _updateCombat(deltaSeconds, trackedPosition, isDriving: isDriving);
+    _updatePickups(deltaSeconds, trackedPosition);
 
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
@@ -956,6 +996,8 @@ class Game {
 
   void _respawnAfterDeath() {
     _deathSeconds = 0.0;
+    // "Больница" — лечение не бесплатное.
+    wallet.charge(_economy.hospital.amountFor(wallet.balance), TransactionReason.hospital);
     playerHealth.reset();
     wantedState.stars = 0;
     policeSystem.clearUnits();
@@ -979,6 +1021,7 @@ class Game {
   }
 
   void _handleArrest() {
+    wallet.charge(_economy.arrest.amountFor(wallet.balance), TransactionReason.arrestFine);
     wantedState.stars = 0;
     policeSystem.clearUnits();
     arrestState.trigger();

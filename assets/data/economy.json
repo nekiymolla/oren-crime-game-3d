@@ -1,0 +1,10 @@
+{
+  "comment": "Экономика (ТЗ, раздел 17). Рубли, целые. Штрафы не уводят баланс в минус: забирается сколько есть.",
+  "startingMoney": 300,
+  "hospital": { "base": 150, "percent": 0.1 },
+  "arrest": { "base": 100, "percent": 0.05 },
+  "pedestrianDrop": { "min": 15, "max": 120 },
+  "officerDrop": { "min": 60, "max": 220, "ammo": 8 },
+  "pickupLifetimeSeconds": 60.0,
+  "pickupRadius": 1.4
+}

@@ -33,6 +33,12 @@ class _Fake implements ShootTargets {
 
   @override
   int scareAround(vm.Vector3 shooter, double radius) => 2;
+
+  @override
+  vm.Vector3 feetOf(int index) => vm.Vector3.zero();
+
+  @override
+  TargetKind kindOf(int index) => TargetKind.pedestrian;
 }
 
 void main() {

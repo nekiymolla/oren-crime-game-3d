@@ -9,8 +9,12 @@ import 'weapon_state.dart';
 /// попадания или null.
 typedef BulletRaycast = double? Function(vm.Vector3 origin, vm.Vector3 direction, double maxDistance);
 
-/// В кого можно попасть — сейчас это пешеходы (PedestrianSystem). Интерфейс,
-/// а не сам класс, чтобы логику стрельбы проверять тестами без GPU.
+/// Кто убит — от этого зависит добыча (lib/economy/).
+enum TargetKind { pedestrian, officer }
+
+/// В кого можно попасть — пешеходы (PedestrianSystem) и полицейские
+/// (PoliceOfficers). Интерфейс, а не сами классы, чтобы логику стрельбы
+/// проверять тестами без GPU.
 abstract interface class ShootTargets {
   ({int index, double distance, BodyZone zone})? raycastShootable(
     vm.Vector3 origin,
@@ -25,6 +29,11 @@ abstract interface class ShootTargets {
 
   /// Сколько живых услышали выстрел (и побежали).
   int scareAround(vm.Vector3 shooter, double radius);
+
+  /// Где стоит (лежит) цель [index] — ступни, на земле.
+  vm.Vector3 feetOf(int index);
+
+  TargetKind kindOf(int index);
 }
 
 /// Чем закончилась одна пуля — для эффектов (трассер, искры/кровь).
@@ -39,7 +48,17 @@ class BulletTrace {
 
 /// Итог одного выстрела — для эффектов и розыска.
 class ShotOutcome {
-  ShotOutcome({required this.muzzle, required this.bullets, required this.wounded, required this.killed, required this.witnesses});
+  ShotOutcome({
+    required this.muzzle,
+    required this.bullets,
+    required this.wounded,
+    required this.killed,
+    required this.witnesses,
+    this.kills = const [],
+  });
+
+  /// Убитые этим выстрелом — где и кто (для добычи).
+  final List<({vm.Vector3 feet, TargetKind kind})> kills;
 
   final vm.Vector3 muzzle;
   final List<BulletTrace> bullets;
@@ -80,6 +99,7 @@ class PlayerShooting {
     final spread = weapon.currentSpreadDegrees * math.pi / 180;
 
     final bullets = <BulletTrace>[];
+    final kills = <({vm.Vector3 feet, TargetKind kind})>[];
     var wounded = 0;
     var killed = 0;
     for (var i = 0; i < config.pellets; i++) {
@@ -90,6 +110,7 @@ class PlayerShooting {
         final died = targets.applyShot(hit.index, damageFor(config, hit.zone), muzzle);
         if (died) {
           killed++;
+          kills.add((feet: targets.feetOf(hit.index), kind: targets.kindOf(hit.index)));
         } else {
           wounded++;
         }
@@ -102,7 +123,14 @@ class PlayerShooting {
     }
 
     final witnesses = targets.scareAround(muzzle, hearingRadius);
-    return ShotOutcome(muzzle: muzzle, bullets: bullets, wounded: wounded, killed: killed, witnesses: witnesses);
+    return ShotOutcome(
+      muzzle: muzzle,
+      bullets: bullets,
+      wounded: wounded,
+      killed: killed,
+      witnesses: witnesses,
+      kills: kills,
+    );
   }
 
   /// Куда целимся: автоприцел, иначе первое, во что упирается луч
@@ -183,6 +211,12 @@ class CombinedShootTargets implements ShootTargets {
       indices.addAll(_indices.map((i) => p * _stride + i));
     }
   }
+
+  @override
+  vm.Vector3 feetOf(int index) => parts[index ~/ _stride].feetOf(index % _stride);
+
+  @override
+  TargetKind kindOf(int index) => parts[index ~/ _stride].kindOf(index % _stride);
 
   @override
   int scareAround(vm.Vector3 shooter, double radius) {

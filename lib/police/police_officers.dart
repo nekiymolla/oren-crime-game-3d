@@ -177,6 +177,12 @@ class PoliceOfficers implements ShootTargets {
     }
   }
 
+  @override
+  vm.Vector3 feetOf(int index) => _slots[index]?.position.clone() ?? vm.Vector3.zero();
+
+  @override
+  TargetKind kindOf(int index) => TargetKind.officer;
+
   /// Офицеры не разбегаются, но стрельба при них — всегда при свидетелях.
   @override
   int scareAround(vm.Vector3 shooter, double radius) =>

@@ -45,6 +45,12 @@ class _FakeTargets implements ShootTargets {
     scared++;
     return feet.where((f) => (f - shooter).length <= radius).length;
   }
+
+  @override
+  vm.Vector3 feetOf(int index) => feet[index];
+
+  @override
+  TargetKind kindOf(int index) => TargetKind.pedestrian;
 }
 
 const _pistol = WeaponConfig(
@@ -79,6 +85,9 @@ void main() {
       last = shooting.tryFire(eye: eye, viewDirection: view, muzzle: muzzle);
     }
     expect(last!.killed, 1);
+    // Убитый — с местом, чтобы там выпала добыча.
+    expect(last.kills.single.feet, vm.Vector3(2.0, 0, 20));
+    expect(last.kills.single.kind, TargetKind.pedestrian);
   });
 
   test('стена между стволом и целью — пуля в стену', () {

@@ -152,6 +152,12 @@ class PedestrianSystem implements ShootTargets {
     return witnesses;
   }
 
+  @override
+  vm.Vector3 feetOf(int index) => _pedestrians[index].position.clone();
+
+  @override
+  TargetKind kindOf(int index) => TargetKind.pedestrian;
+
   /// Точки прицеливания (грудь) живых стоящих пешеходов — для
   /// автоприцела. [indices] получает их номера для [applyShot].
   @override
