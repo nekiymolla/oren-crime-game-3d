@@ -10,8 +10,11 @@ import '../pedestrians/pedestrian_system.dart';
 import '../player/character_collision_field.dart';
 import '../player/character_controller_component.dart';
 import '../player/game_camera_controller.dart';
+import '../player/player_health.dart';
 import '../player/player_input_bridge_component.dart';
+import '../player/death_state.dart';
 import '../police/arrest_state.dart';
+import '../police/police_officer.dart';
 import '../police/police_system.dart';
 import '../time/day_night.dart';
 import '../time/day_night_view.dart';
@@ -166,6 +169,15 @@ class Game {
 
   /// Целимся сейчас — HUD показывает прицел.
   bool get isAiming => cameraController.aiming;
+
+  /// Здоровье игрока — по нему стреляет полиция (lib/police/police_officers.dart).
+  final PlayerHealth playerHealth = PlayerHealth();
+
+  /// Сколько ещё секунд игрок лежит убитым до возрождения (0 — жив).
+  double _deathSeconds = 0.0;
+  static const double _deathLieSeconds = 3.5;
+
+  bool get isDead => _deathSeconds > 0.0;
 
   /// С запасом покрывает весь загружаемый чанками район (~1900x1600 м, см.
   /// PROGRESS.md) — плоскость всего 2 треугольника, размер почти бесплатен,
@@ -376,11 +388,16 @@ class Game {
     // Движение камеры-относительное ("вперёд" на джойстике = "от камеры",
     // а не "куда сейчас смотрит персонаж") — мосту нужен уже готовый
     // cameraController, поэтому он добавляется последним.
-    playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController));
+    playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController, isLocked: () => isDead));
 
     final weapons = await loadWeaponCatalog();
     weapon = WeaponState(weapons.defaultWeapon);
-    _shooting = PlayerShooting(weapon: weapon, targets: pedestrians, worldRaycast: _bulletRaycast);
+    _shooting = PlayerShooting(
+      weapon: weapon,
+      targets: CombinedShootTargets([pedestrians, policeSystem.officers]),
+      worldRaycast: _bulletRaycast,
+    );
+    scene.add(policeSystem.officers.buildNode());
     _weaponEffects = WeaponEffectsView();
     scene.add(_weaponEffects.buildNode());
   }
@@ -452,6 +469,7 @@ class Game {
   /// показывать). Зовётся HUD-ом каждый кадр, поэтому без аллокаций сверх
   /// поиска ближайшей машины.
   VehicleInteraction? get vehicleInteraction {
+    if (isDead) return null;
     if (gameModeState.mode == ControlMode.driving) return VehicleInteraction.exit;
     final target = _nearestEnterable();
     if (target == null) return null;
@@ -699,7 +717,10 @@ class Game {
 
   /// Луч пули против мира: чанки района вдоль луча и машины рядом с ним.
   /// Пешеходы — отдельно, аналитически (PedestrianSystem.raycastShootable).
-  double? _bulletRaycast(vm.Vector3 origin, vm.Vector3 direction, double maxDistance) {
+  ///
+  /// [includePolice] = false — без патрульных машин: офицер стоит вплотную
+  /// к своей и стреляет мимо неё, иначе она закрывала бы ему обзор.
+  double? _bulletRaycast(vm.Vector3 origin, vm.Vector3 direction, double maxDistance, {bool includePolice = true}) {
     final end = origin + direction * maxDistance;
     _bulletBox
       ..min.setValues(math.min(origin.x, end.x), math.min(origin.y, end.y), math.min(origin.z, end.z))
@@ -712,7 +733,7 @@ class Game {
       for (final car in _parkedPlayerCars) car.node,
       ..._decorCars,
       ...traffic.carNodes,
-      ...policeSystem.unitNodes,
+      if (includePolice) ...policeSystem.unitNodes,
     ];
     for (final car in cars) {
       if ((car.globalTransform.getTranslation() - origin).length2 <= reachSq) _bulletCandidates.add(car);
@@ -732,7 +753,7 @@ class Game {
   void _updateWeapon(double deltaSeconds, {required bool isDriving}) {
     weapon.update(deltaSeconds);
     _weaponEffects.update(deltaSeconds);
-    if (isDriving) {
+    if (isDriving || isDead) {
       inputState.consumeReload();
       _aimHoldSeconds = 0.0;
       cameraController.aiming = false;
@@ -816,8 +837,13 @@ class Game {
     );
     if (ranRedLight) wantedSystem.reportMinorCrime();
 
-    final caught = policeSystem.update(deltaSeconds, trackedPosition);
-    if (caught) _handleArrest();
+    final caught = policeSystem.update(
+      deltaSeconds,
+      trackedPosition,
+      blockers: traffic.carNodes.map((node) => node.globalTransform.getTranslation()),
+    );
+    if (caught && !isDead) _handleArrest();
+    _updateCombat(deltaSeconds, trackedPosition, isDriving: isDriving);
 
     if (isDriving && !userIsAdjustingCamera) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
@@ -863,6 +889,9 @@ class Game {
     for (final position in pedestrians.positions) {
       yield (position: position, radius: PedestrianSystem.bodyRadius);
     }
+    for (final position in policeSystem.officers.alivePositions) {
+      yield (position: position, radius: PedestrianSystem.bodyRadius);
+    }
   }
 
   /// Игрока поймали (см. PoliceSystem.update) — розыск сбрасывается,
@@ -870,6 +899,85 @@ class Game {
   /// постепенно), игрок телепортируется к точке спавна (условная
   /// "безопасная точка" — отдельного полицейского участка на карте пока
   /// нет). HUD показывает баннер через ArrestState (см. arrest_banner.dart).
+  /// Полиция стреляет по игроку, здоровье, смерть и возрождение.
+  void _updateCombat(double deltaSeconds, vm.Vector3 trackedPosition, {required bool isDriving}) {
+    playerHealth.update(deltaSeconds);
+    if (isDead) {
+      _deathSeconds -= deltaSeconds;
+      if (_deathSeconds <= 0.0) _respawnAfterDeath();
+      return;
+    }
+
+    final speed = isDriving ? vehicle.controller.speed : (_movement?.horizontalSpeed ?? 0.0);
+    final shots = policeSystem.officers.update(
+      deltaSeconds,
+      trackedPosition,
+      playerSpeed: speed,
+      playerInVehicle: isDriving,
+      lineOfSight: (from, to) {
+        final delta = to - from;
+        final distance = delta.length;
+        // Чуть недотягиваем: сама цель (машина игрока) — тоже препятствие.
+        return _bulletRaycast(from, delta / distance, math.max(0.0, distance - 2.5), includePolice: false) == null;
+      },
+      // Путь на уровне колен и груди: низкий забор тоже преграда.
+      pathClear: (from, direction, distance) =>
+          _bulletRaycast(from + vm.Vector3(0, 0.5, 0), direction, distance) == null &&
+          _bulletRaycast(from + vm.Vector3(0, 1.2, 0), direction, distance) == null,
+    );
+    for (final shot in shots) {
+      _weaponEffects.showShot(
+        ShotOutcome(
+          muzzle: shot.muzzle,
+          bullets: [BulletTrace(shot.end, shot.hit ? BulletImpact.flesh : BulletImpact.none)],
+          wounded: 0,
+          killed: 0,
+          witnesses: 0,
+        ),
+      );
+      if (!shot.hit) continue;
+      // Кузов закрывает от половины пуль.
+      final damage = OfficerTuning.damage * (isDriving ? 0.5 : 1.0);
+      if (playerHealth.takeDamage(damage)) {
+        _handleDeath();
+        return;
+      }
+    }
+  }
+
+  /// Игрок убит: выходит из машины, падает и лежит, потом возрождается.
+  void _handleDeath() {
+    inputState.fireHeld = false;
+    if (gameModeState.mode == ControlMode.driving) toggleVehicle();
+    _deathSeconds = _deathLieSeconds;
+    deathState.trigger();
+    _setPlayerLying(true);
+  }
+
+  void _respawnAfterDeath() {
+    _deathSeconds = 0.0;
+    playerHealth.reset();
+    wantedState.stars = 0;
+    policeSystem.clearUnits();
+    _setPlayerLying(false);
+    _movement?.teleport(worldConfig.playerSpawnPosition);
+    cameraController.followTarget = playerNode;
+  }
+
+  /// Капсула игрока лежит на земле (убит) или стоит.
+  void _setPlayerLying(bool lying) {
+    final mesh = _playerMeshNode;
+    if (mesh == null) return;
+    const totalHeight = _playerCapsuleHeight + _playerCapsuleRadius * 2;
+    mesh.localTransform = lying
+        ? vm.Matrix4.compose(
+            vm.Vector3(0, _playerCapsuleRadius, 0),
+            vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), math.pi / 2),
+            vm.Vector3.all(1.0),
+          )
+        : vm.Matrix4.translation(vm.Vector3(0, totalHeight / 2, 0));
+  }
+
   void _handleArrest() {
     wantedState.stars = 0;
     policeSystem.clearUnits();

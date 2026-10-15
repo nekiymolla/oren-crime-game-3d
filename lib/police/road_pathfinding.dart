@@ -107,3 +107,15 @@ List<String>? findShortestPath(
   }
   return path.reversed.toList();
 }
+
+/// Длина маршрута [path] (id узлов) по прямым между узлами, метры.
+double routeLength(RoadGraph graph, List<String> path) {
+  var total = 0.0;
+  for (var i = 1; i < path.length; i++) {
+    final a = graph.nodes[path[i - 1]];
+    final b = graph.nodes[path[i]];
+    if (a == null || b == null) continue;
+    total += (b.toVector3() - a.toVector3()).length;
+  }
+  return total;
+}

@@ -146,3 +146,50 @@ class PlayerShooting {
     return start + view * distance;
   }
 }
+
+/// Несколько наборов целей как один (пешеходы и полицейские): индекс
+/// цели кодирует, из какого она набора.
+class CombinedShootTargets implements ShootTargets {
+  CombinedShootTargets(this.parts);
+
+  final List<ShootTargets> parts;
+
+  static const int _stride = 1 << 16;
+
+  final List<vm.Vector3> _points = [];
+  final List<int> _indices = [];
+
+  @override
+  ({int index, double distance, BodyZone zone})? raycastShootable(vm.Vector3 origin, vm.Vector3 direction, double maxDistance) {
+    ({int index, double distance, BodyZone zone})? best;
+    for (var p = 0; p < parts.length; p++) {
+      final hit = parts[p].raycastShootable(origin, direction, best?.distance ?? maxDistance);
+      if (hit != null) best = (index: p * _stride + hit.index, distance: hit.distance, zone: hit.zone);
+    }
+    return best;
+  }
+
+  @override
+  bool applyShot(int index, double damage, vm.Vector3 from) =>
+      parts[index ~/ _stride].applyShot(index % _stride, damage, from);
+
+  @override
+  void collectAimPoints(List<vm.Vector3> points, List<int> indices) {
+    for (var p = 0; p < parts.length; p++) {
+      _points.clear();
+      _indices.clear();
+      parts[p].collectAimPoints(_points, _indices);
+      points.addAll(_points);
+      indices.addAll(_indices.map((i) => p * _stride + i));
+    }
+  }
+
+  @override
+  int scareAround(vm.Vector3 shooter, double radius) {
+    var witnesses = 0;
+    for (final part in parts) {
+      witnesses += part.scareAround(shooter, radius);
+    }
+    return witnesses;
+  }
+}

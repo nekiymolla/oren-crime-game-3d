@@ -70,6 +70,7 @@ class CharacterControllerComponent extends Component {
   set facingYawOverride(double? yaw) => motion.facingYawOverride = yaw;
 
   vm.Vector3 get velocity => motion.velocity;
+  double get horizontalSpeed => motion.horizontalSpeed;
   bool get isGrounded => motion.isGrounded;
 
   /// 0 выключает обход препятствий (только для замеров — без него игрок

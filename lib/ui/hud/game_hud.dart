@@ -15,6 +15,7 @@ import '../controls/virtual_joystick.dart';
 import '../controls/weapon_controls.dart';
 import 'arrest_banner.dart';
 import 'clock_hud.dart';
+import 'health_hud.dart';
 import 'wanted_stars.dart';
 import 'weapon_hud.dart';
 
@@ -53,6 +54,7 @@ class _GameHudState extends State<GameHud> {
   /// через Ticker) этот путь явно дёргает setState — смена режима дискретна
   /// и происходит только по нажатию, лишний Ticker здесь не нужен.
   void _toggleVehicle() {
+    if (game.isDead) return;
     // Кнопка огня исчезает вместе с пешим набором кнопок — палец с неё
     // уже не "отпустится", и после высадки стрельба шла бы сама.
     inputState.fireHeld = false;
@@ -166,7 +168,9 @@ class _GameHudState extends State<GameHud> {
                   top: MediaQuery.of(context).padding.top + 72,
                   child: QualityDebugPanel(game: game),
                 ),
+              Positioned.fill(child: HealthHud(game: game)),
               const ArrestBanner(),
+              const DeathBanner(),
             ],
           );
         },

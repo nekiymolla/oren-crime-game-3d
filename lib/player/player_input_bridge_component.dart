@@ -16,7 +16,10 @@ import 'character_controller_component.dart';
 /// иначе после разворота камеры вокруг игрока джойстик вёл бы в неожиданную
 /// сторону.
 class PlayerInputBridgeComponent extends Component {
-  PlayerInputBridgeComponent(this.movement, this.camera);
+  PlayerInputBridgeComponent(this.movement, this.camera, {this.isLocked});
+
+  /// Ввод игнорируется (игрок убит и лежит) — персонаж стоит на месте.
+  final bool Function()? isLocked;
 
   final CharacterControllerComponent movement;
   final FollowCameraController camera;
@@ -35,6 +38,11 @@ class PlayerInputBridgeComponent extends Component {
       return;
     }
     if (!movement.enabled) movement.enabled = true;
+    if (isLocked?.call() ?? false) {
+      movement.setMoveInput(vm.Vector2.zero());
+      inputState.consumeJump();
+      return;
+    }
     movement.setMoveInput(
       inputState.moveDirection,
       isRunning: inputState.isRunning,

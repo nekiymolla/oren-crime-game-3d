@@ -20,6 +20,8 @@ RoadGraph _buildLineGraph() {
 }
 
 void main() {
+  routeLengthTests();
+
   test('buildVehicleAdjacency игнорирует пешеходные типы дорог', () {
     final graph = RoadGraph(
       nodes: const {
@@ -82,5 +84,20 @@ void main() {
     final adjacency = buildVehicleAdjacency(graph);
     final nearest = nearestVehicleNodeId(graph, adjacency, graph.nodes['isolated']!.toVector3());
     expect(nearest, 'a'); // ближе isolated, но у него нет проезжих соседей
+  });
+}
+
+void routeLengthTests() {
+  test('длина маршрута — сумма отрезков', () {
+    final graph = RoadGraph(
+      nodes: {
+        'a': const RoadGraphNode(id: 'a', x: 0, z: 0),
+        'b': const RoadGraphNode(id: 'b', x: 3, z: 4),
+        'c': const RoadGraphNode(id: 'c', x: 3, z: 10),
+      },
+      edges: const [],
+    );
+    expect(routeLength(graph, ['a', 'b', 'c']), closeTo(11, 1e-4));
+    expect(routeLength(graph, ['a']), 0);
   });
 }
