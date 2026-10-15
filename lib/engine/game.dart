@@ -19,6 +19,8 @@ import '../player/death_state.dart';
 import '../police/arrest_state.dart';
 import '../properties/property.dart';
 import '../properties/property_markers_view.dart';
+import '../save/save_data.dart';
+import '../save/save_store.dart';
 import '../police/police_officer.dart';
 import '../police/police_system.dart';
 import '../time/day_night.dart';
@@ -194,6 +196,12 @@ class Game {
   /// Недвижимость (lib/properties/): что куплено, где возрождаться.
   late final PropertySystem properties;
   late final PropertyMarkersView _propertyMarkers;
+
+  /// Сохранение (lib/save/): файл в документах приложения.
+  final SaveStore _saveStore = SaveStore();
+
+  /// Когда последний раз сохранились — HUD показывает "Сохранено".
+  DateTime? lastSavedAt;
 
   /// С запасом покрывает весь загружаемый чанками район (~1900x1600 м, см.
   /// PROGRESS.md) — плоскость всего 2 треугольника, размер почти бесплатен,
@@ -426,6 +434,56 @@ class Game {
     scene.add(policeSystem.officers.buildNode());
     _weaponEffects = WeaponEffectsView();
     scene.add(_weaponEffects.buildNode());
+
+    // Последним: сохранение перекрывает стартовые значения всего выше.
+    final save = await _saveStore.read();
+    if (save != null) _applySave(save);
+  }
+
+  /// Снимок прогресса для сохранения.
+  SaveData _snapshot() => SaveData(
+    money: wallet.balance,
+    ownedProperties: properties.owned.toList(),
+    position: playerNode.globalTransform.getTranslation(),
+    yaw: _movement?.motion.yaw ?? 0.0,
+    health: playerHealth.health,
+    weaponId: weapon.config.id,
+    ammoInMagazine: weapon.ammoInMagazine,
+    reserveAmmo: weapon.reserveAmmo,
+    clockHours: clock.hours,
+    dayOfYear: clock.dayOfYear,
+    weather: weather.kind.name,
+    qualityPreset: quality.name,
+  );
+
+  void _applySave(SaveData save) {
+    wallet.restore(save.money);
+    properties.owned
+      ..clear()
+      ..addAll(save.ownedProperties.where((id) => properties.properties.any((p) => p.id == id)));
+    playerNode.position = save.position;
+    _movement?.teleport(save.position, yaw: save.yaw);
+    playerHealth.health = save.health.clamp(1.0, PlayerHealth.maxHealth);
+    if (save.weaponId == weapon.config.id) {
+      weapon
+        ..ammoInMagazine = save.ammoInMagazine.clamp(0, weapon.config.magazineSize)
+        ..reserveAmmo = save.reserveAmmo.clamp(0, 9999);
+    }
+    clock
+      ..hours = save.clockHours.clamp(0.0, 23.99)
+      ..dayOfYear = save.dayOfYear;
+    final savedWeather = WeatherKind.values.where((kind) => kind.name == save.weather);
+    if (savedWeather.isNotEmpty) weather.setWeather(savedWeather.first, immediately: true);
+    final preset = qualityPresets.presets[save.qualityPreset];
+    if (preset != null) applyQuality(preset);
+  }
+
+  /// Сохраниться у своего дома. false — не здесь или идёт розыск.
+  Future<bool> saveGame() async {
+    if (!(propertyInteraction?.canSave ?? false)) return false;
+    await _saveStore.write(_snapshot());
+    lastSavedAt = DateTime.now();
+    return true;
   }
 
   /// Применяет рендерную часть пресета к уже живой сцене — ради этого
@@ -1025,14 +1083,17 @@ class Game {
   /// только пешком и живым.
   PropertyInteraction? get propertyInteraction {
     if (isDead || gameModeState.mode != ControlMode.onFoot) return null;
-    return properties.interactionAt(playerNode.globalTransform.getTranslation(), wallet);
+    return properties.interactionAt(playerNode.globalTransform.getTranslation(), wallet, wanted: wantedState.stars > 0);
   }
 
   /// Купить дом, у входа в который стоит игрок. true — куплен.
   bool buyNearbyProperty() {
     final interaction = propertyInteraction;
     if (interaction == null || interaction.owned) return false;
-    return properties.buy(interaction.property, wallet);
+    final bought = properties.buy(interaction.property, wallet);
+    // Покупку не должен отменить вылет игры — сразу автосохранение.
+    if (bought) saveGame();
+    return bought;
   }
 
   /// Капсула игрока лежит на земле (убит) или стоит.

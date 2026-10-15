@@ -41,6 +41,13 @@ class Wallet {
 
   Transaction? get lastTransaction => history.isEmpty ? null : history.last;
 
+  /// Загрузка сохранения: баланс как был, без операции в истории.
+  void restore(int balance) {
+    _balance = math.max(0, balance);
+    history.clear();
+    revision++;
+  }
+
   void earn(int amount, TransactionReason reason) {
     if (amount <= 0) return;
     _balance += amount;

@@ -59,21 +59,30 @@ Future<List<PropertyConfig>> loadProperties() async {
 
 /// Что можно сделать у входа в дом — для кнопки в HUD.
 class PropertyInteraction {
-  const PropertyInteraction({required this.property, required this.owned, required this.affordable});
+  const PropertyInteraction({
+    required this.property,
+    required this.owned,
+    required this.affordable,
+    this.canSave = false,
+  });
 
   final PropertyConfig property;
   final bool owned;
   final bool affordable;
+
+  /// Свой дом с точкой сохранения и нет розыска — можно сохраниться.
+  final bool canSave;
 
   @override
   bool operator ==(Object other) =>
       other is PropertyInteraction &&
       other.property.id == property.id &&
       other.owned == owned &&
-      other.affordable == affordable;
+      other.affordable == affordable &&
+      other.canSave == canSave;
 
   @override
-  int get hashCode => Object.hash(property.id, owned, affordable);
+  int get hashCode => Object.hash(property.id, owned, affordable, canSave);
 }
 
 /// Недвижимость игрока: что есть в мире, что куплено. Чистая логика
@@ -90,13 +99,19 @@ class PropertySystem {
   bool isOwned(PropertyConfig property) => owned.contains(property.id);
 
   /// Вход в пределах [interactRadius] от [position] (по плоскости).
-  PropertyInteraction? interactionAt(vm.Vector3 position, Wallet wallet) {
+  /// [wanted] — идёт розыск: сохраняться нельзя, как в GTA.
+  PropertyInteraction? interactionAt(vm.Vector3 position, Wallet wallet, {bool wanted = false}) {
     for (final property in properties) {
       final dx = property.entryPoint.x - position.x;
       final dz = property.entryPoint.z - position.z;
       if (dx * dx + dz * dz > interactRadius * interactRadius) continue;
       final isOwned = owned.contains(property.id);
-      return PropertyInteraction(property: property, owned: isOwned, affordable: isOwned || wallet.balance >= property.price);
+      return PropertyInteraction(
+        property: property,
+        owned: isOwned,
+        affordable: isOwned || wallet.balance >= property.price,
+        canSave: isOwned && property.isSaveSpot && !wanted,
+      );
     }
     return null;
   }
