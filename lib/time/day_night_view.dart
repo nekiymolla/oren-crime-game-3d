@@ -21,6 +21,7 @@ class DayNightView {
     required this.shadowsAllowed,
     this.onNightFactor,
     this.unlitSurfaces = const [],
+    this.onUnlitTint,
   });
 
   /// Видимое небо — шейдер crime_sky.fmat (солнце, луна, звёзды). null —
@@ -43,6 +44,10 @@ class DayNightView {
   /// Unlit-поверхности (плейсхолдер-земля) — свет на них не действует,
   /// поэтому их цвет затемняется вручную (см. SkyLighting.unlitTint).
   final List<UnlitMaterial> unlitSurfaces;
+
+  /// Поверхности со своим шейдером, которым нужен тот же оттенок неба и
+  /// снег (текстурная земля, см. TexturedGround).
+  final void Function(vm.Vector3 tint, double snowCover)? onUnlitTint;
   late final List<vm.Vector4> _unlitDayColors = [for (final m in unlitSurfaces) m.baseColorFactor.clone()];
 
   /// Материалы окон из чанков района (помечены пайплайном
@@ -116,6 +121,7 @@ class DayNightView {
         ..setFloat('time_seconds', _skyTime);
     }
     final tint = lighting.unlitTint;
+    onUnlitTint?.call(tint, snowCover);
     for (var i = 0; i < unlitSurfaces.length; i++) {
       // Снег ложится на подложку-газон: цвет уходит к белому.
       final day = _unlitDayColors[i];

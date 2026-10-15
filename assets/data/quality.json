@@ -18,7 +18,8 @@
       "godRaysEnabled": false,
       "wetReflectionsEnabled": false,
       "precipitationParticles": 300,
-      "maxTrees": 80
+      "maxTrees": 80,
+      "texturedGround": false
     },
     "medium": {
       "renderScale": 0.75,
@@ -35,7 +36,8 @@
       "godRaysEnabled": true,
       "wetReflectionsEnabled": false,
       "precipitationParticles": 600,
-      "maxTrees": 150
+      "maxTrees": 150,
+      "texturedGround": true
     },
     "high": {
       "comment": "Максимальное качество для сильных устройств (iPhone 13 держит на этом 60 FPS). shadowMapResolution понижен до 512 по результатам замера: разница в чёткости теней на мобильном экране не читается, а стоит 1024 лишние 8 мс raster. Каскады оставлены 4 — на замере их число не влияло ни на что, так что пусть будет качество.",
@@ -53,7 +55,8 @@
       "godRaysEnabled": true,
       "wetReflectionsEnabled": false,
       "precipitationParticles": 1200,
-      "maxTrees": 220
+      "maxTrees": 220,
+      "texturedGround": true
     }
   }
 }

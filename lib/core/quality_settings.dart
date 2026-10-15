@@ -31,6 +31,7 @@ class QualitySettings {
     this.godRaysEnabled = true,
     this.wetReflectionsEnabled = false,
     this.precipitationParticles = 800,
+    this.texturedGround = true,
   });
 
   factory QualitySettings.fromJson(String name, Map<String, dynamic> json) => QualitySettings(
@@ -52,6 +53,7 @@ class QualitySettings {
     godRaysEnabled: json['godRaysEnabled'] as bool? ?? true,
     wetReflectionsEnabled: json['wetReflectionsEnabled'] as bool? ?? false,
     precipitationParticles: json['precipitationParticles'] as int? ?? 800,
+    texturedGround: json['texturedGround'] as bool? ?? true,
     maxTrees: json['maxTrees'] as int,
   );
 
@@ -96,6 +98,11 @@ class QualitySettings {
   /// каждая пересчитывается каждый кадр. Мировая настройка (в load()).
   final int precipitationParticles;
 
+  /// Земля с текстурой травы и тенями (ground.fmat) вместо однотонной
+  /// заливки. Мировая настройка (в load()): на слабом Android плоскость во
+  /// весь экран — главный потребитель raster (см. terrain.dart).
+  final bool texturedGround;
+
   /// Для debug-панели: снять один фактор, не трогая остальные. Пресеты
   /// отличаются сразу многим, а чтобы понять, что именно стоит дорого,
   /// нужно менять по одному (см. PROGRESS.md — на угадывании уже теряли
@@ -123,6 +130,7 @@ class QualitySettings {
     godRaysEnabled: godRaysEnabled,
     wetReflectionsEnabled: wetReflectionsEnabled,
     precipitationParticles: precipitationParticles,
+    texturedGround: texturedGround,
   );
 
   static AntiAliasingMode _parseAntiAliasing(String raw) => switch (raw) {

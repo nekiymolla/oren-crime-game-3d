@@ -283,7 +283,9 @@ class Game {
     // между дорогами/зданиями (osm2world строит поверхности только там, где
     // OSM что-то размечает, а разметка реального района местами скудная —
     // см. PROGRESS.md).
-    final ground = buildPlaceholderGround(sizeMeters: groundSizeMeters)..position = vm.Vector3(0, -0.05, 0);
+    final textured = quality.texturedGround ? await TexturedGround.load(sizeMeters: groundSizeMeters) : null;
+    final ground = (textured?.node ?? buildPlaceholderGround(sizeMeters: groundSizeMeters))
+      ..position = vm.Vector3(0, -0.05, 0);
     _groundNode = ground;
     scene.add(ground);
     scene.add(_buildSun());
@@ -300,7 +302,10 @@ class Game {
         setHeadlightsGlow(night);
         _facades.night = night;
       },
-      unlitSurfaces: [ground.mesh!.primitives.first.material as UnlitMaterial],
+      unlitSurfaces: [
+        if (ground.mesh!.primitives.first.material case final UnlitMaterial flat) flat,
+      ],
+      onUnlitTint: textured?.update,
     );
     _weatherView = WeatherView(
       scene: scene,

@@ -25,3 +25,43 @@ Node buildPlaceholderGround({required double sizeMeters}) {
   final material = UnlitMaterial()..baseColorFactor = vm.Vector4(0.42, 0.55, 0.28, 1.0);
   return Node(mesh: Mesh(geometry, material));
 }
+
+/// Земля с текстурами травы и тенями (assets/shaders/ground.fmat) — для
+/// пресетов, где плоскость во весь экран не съест кадр (quality.json,
+/// texturedGround). Текстуры лежат в assets/models/ground/ground_textures.glb
+/// (tools/assets/prepare_ground.mjs). null — не загрузилось, тогда остаётся
+/// однотонная заливка [buildPlaceholderGround].
+class TexturedGround {
+  TexturedGround._(this.node, this._material);
+
+  final Node node;
+  final PreprocessedMaterial _material;
+
+  static Future<TexturedGround?> load({required double sizeMeters}) async {
+    try {
+      final textures = await loadScene('assets/models/ground/ground_textures.glb');
+      final material = await loadFmatMaterial('assets/shaders/ground.fmat');
+      for (final (name, parameter) in [('Grass', 'grass_texture'), ('Dirt', 'dirt_texture')]) {
+        final source = textures.getChildByName(name)?.mesh?.primitives.first.material;
+        final texture = source is PhysicallyBasedMaterial ? source.baseColorTexture : null;
+        final gpuTexture = texture?.sampledTexture;
+        if (gpuTexture == null) return null;
+        material.parameters.setTexture(parameter, gpuTexture, sampler: texture!.sampledSampler);
+      }
+      final node = Node(mesh: Mesh(PlaneGeometry(width: sizeMeters, depth: sizeMeters), material));
+      return TexturedGround._(node, material);
+    } catch (error) {
+      // ignore: avoid_print
+      print('TexturedGround: не загрузилась ($error) — однотонная земля');
+      return null;
+    }
+  }
+
+  /// Оттенок неба (SkyLighting.unlitTint) и снег 0..1 — каждый кадр из
+  /// суточного цикла.
+  void update(vm.Vector3 tint, double snowCover) {
+    _material.parameters
+      ..setVec3('light_tint', tint)
+      ..setFloat('snow', snowCover);
+  }
+}

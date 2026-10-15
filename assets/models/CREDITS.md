@@ -23,3 +23,8 @@ Quaternius — Cars Bundle (https://poly.pizza/bundle/Cars-Bundle-FE5IWe6OMk).
 
 Подготовка: `tools/assets/prepare_vehicles.mjs` (колёса с опорой в центре,
 роли материалов Paint/Glass/Headlights/TailLights/Siren_*, перед на +Z игры).
+
+## Текстуры земли — assets/models/ground/
+
+ambientCG — Grass004 и Ground037 (https://ambientcg.com). Лицензия: CC0 1.0.
+Уменьшены до 512 px и упакованы в glb `tools/assets/prepare_ground.mjs`.

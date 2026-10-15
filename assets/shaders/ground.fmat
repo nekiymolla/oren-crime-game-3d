@@ -1,0 +1,78 @@
+// Земля-подложка района: трава вперемешку с проплешинами (две текстуры
+// ambientCG, CC0) по мировым координатам, без UV. Против заметного повтора
+// плитки — второй проход той же травы в другом масштабе и повороте и
+// крупные пятна сухой земли по низкочастотному рисунку.
+//
+// Модель shadowCatcher, а не lit: полное освещение этой плоскости во весь
+// экран стоило 92 мс raster на слабом Android (см. terrain.dart). Здесь цвет
+// задаётся напрямую — текстура * оттенок неба из суточного цикла
+// (light_tint, тот же SkyLighting.unlitTint, что был у заливки), — а от
+// движка берутся только тени солнца и AO. Так на газон падают тени машин,
+// людей и деревьев почти по цене unlit.
+material {
+  name: "Ground",
+  shading_model: shadowCatcher,
+  blending: opaque,
+  culling: back,
+  parameters: [
+    { type: vec3, name: light_tint, default: [1, 1, 1] },
+    { type: float, name: brightness, default: 1.7 },
+    { type: float, name: snow, default: 0 },
+    { type: float, name: shadow_strength, default: 0.6 },
+    { type: float, name: ao_strength, default: 0.6 },
+    { type: sampler2d, name: grass_texture, hint: default_white },
+    { type: sampler2d, name: dirt_texture, hint: default_white },
+  ],
+}
+
+fragment {
+  // Видимость солнца (1 — свет, 0 — тень) — только каскады направленного
+  // света, без прожекторов: их на земле нет.
+  float SunVisibility(vec3 world_pos, vec3 n) {
+    float visibility = 1.0;
+#ifndef FLUTTER_SCENE_SKIP_SHADOWS
+    if (frag_info.has_directional_light > 0.5 && frag_info.casts_shadow > 0.5) {
+      vec3 light_vector = -normalize(frag_info.directional_light_direction.xyz);
+      float facing = clamp(dot(n, light_vector) / 0.15, 0.0, 1.0);
+      if (facing > 0.0) visibility = mix(1.0, SampleShadow(world_pos, n), facing);
+    }
+#endif
+    return visibility;
+  }
+
+  void Surface(inout MaterialInputs material) {
+    vec3 p = GetWorldPosition();
+    vec3 n = GetWorldNormal();
+
+    vec2 uv = p.xz / 3.0;
+    // Тот же газон крупнее и повёрнутым — ломает сетку повтора.
+    vec2 uv2 = mat2(0.8, -0.6, 0.6, 0.8) * p.xz / 7.3;
+    vec3 grass = SRGBToLinear(texture(grass_texture, uv).rgb);
+    vec3 grass2 = SRGBToLinear(texture(grass_texture, uv2).rgb);
+    vec3 dirt = SRGBToLinear(texture(dirt_texture, p.xz / 4.1).rgb);
+    // Крупные пятна: та же текстура, растянутая на сотню метров.
+    float macro = dot(texture(dirt_texture, p.xz / 140.0).rgb, vec3(0.33));
+    float patches = smoothstep(0.32, 0.5, macro);
+    vec3 albedo = mix(mix(grass, grass2, 0.45), dirt, patches * 0.75);
+    // Чуть разной яркости участки — газон не одного тона.
+    albedo *= mix(0.85, 1.12, texture(grass_texture, p.xz / 60.0).g);
+
+    // Снег: ложится сначала на траву, проплешины белеют последними.
+    float snowMask = clamp(material_params.snow * 1.25 - patches * 0.25 * (1.0 - material_params.snow), 0.0, 1.0);
+    albedo = mix(albedo, vec3(0.3, 0.32, 0.36), snowMask);
+
+    float visibility = SunVisibility(p, n);
+    float occlusion = 1.0;
+#ifndef FLUTTER_SCENE_SKIP_SSAO
+    if (frag_info.ssao_params.x > 0.5) {
+      vec4 sample_ao = texture(ssao_texture, gl_FragCoord.xy * frag_info.ssao_params.zw);
+      occlusion = frag_info.camera_up.w > 0.5 ? sample_ao.a : sample_ao.r;
+    }
+#endif
+    float shade = (1.0 - material_params.shadow_strength * (1.0 - visibility)) *
+        (1.0 - material_params.ao_strength * (1.0 - occlusion));
+    vec3 color = albedo * material_params.light_tint * material_params.brightness * shade;
+    material.base_color = vec4(color, 1.0);
+    PrepareMaterial(material);
+  }
+}
