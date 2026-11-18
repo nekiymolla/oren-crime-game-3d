@@ -1,3 +1,5 @@
+import 'static_collision_index.dart';
+import '../player/character_motion.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -39,6 +41,70 @@ class DistrictStreamer {
   final VegetationBatch vegetation;
 
   final Map<String, Node> _loaded = {};
+  final Map<Node, StaticCollisionIndex> _collision = {};
+  bool indexedCollision = true;
+
+  CharacterRayHit? castRoot(
+    Node root,
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double reach,
+  ) {
+    final index = _collision[root];
+    if (indexedCollision && index != null) {
+      return index.cast(origin, direction, reach);
+    }
+    final hit = raycastNode(
+      root,
+      vm.Ray.originDirection(origin, direction),
+      maxDistance: reach,
+    );
+    return hit == null
+        ? null
+        : CharacterRayHit(distance: hit.distance, normal: hit.worldNormal);
+  }
+
+  String validateCollisionIndex() {
+    final random = math.Random(42);
+    var rays = 0, hits = 0;
+    for (final entry in _collision.entries) {
+      final bounds = entry.key.combinedWorldBounds;
+      if (bounds == null) continue;
+      for (var i = 0; i < 40; i++) {
+        final origin = vm.Vector3(
+          bounds.min.x + random.nextDouble() * (bounds.max.x - bounds.min.x),
+          i.isEven ? bounds.max.y + 2 : 1,
+          bounds.min.z + random.nextDouble() * (bounds.max.z - bounds.min.z),
+        );
+        final direction = i.isEven
+            ? vm.Vector3(0, -1, 0)
+            : vm.Vector3(
+                random.nextDouble() - .5,
+                0,
+                random.nextDouble() - .5,
+              ).normalized();
+        final reach = i.isEven ? bounds.max.y - bounds.min.y + 4 : 25.0;
+        final old = raycastNode(
+          entry.key,
+          vm.Ray.originDirection(origin, direction),
+          maxDistance: reach,
+        );
+        final hit = entry.value.cast(origin, direction, reach);
+        rays++;
+        if (old != null) hits++;
+        if ((old == null) != (hit == null) ||
+            (old != null &&
+                hit != null &&
+                (old.distance - hit.distance).abs() > .002)) {
+          throw StateError(
+            'Static collision mismatch in ${entry.key.name}: ${old?.distance} / ${hit?.distance}',
+          );
+        }
+      }
+    }
+    return '$rays rays, $hits hits, ${_collision.length} indexed chunks';
+  }
+
   final Map<String, Node> _preparing = {};
   final Map<String, Future<void>> _loading = {};
   late final _center = StreamingCenter(cellSize: manifest.cellSizeMeters);
@@ -76,6 +142,7 @@ class DistrictStreamer {
     for (final id in _loaded.keys.toList()) {
       if (!wanted.contains(id)) {
         onChunkUnloaded?.call(_loaded[id]!);
+        _collision.remove(_loaded[id]);
         scene.remove(_loaded[id]!);
         _loaded.remove(id);
       }
@@ -110,8 +177,10 @@ class DistrictStreamer {
             final node = await loadDistrictChunk(chunk);
             if (!_wanted.contains(chunk.id)) return null;
             _preparing[chunk.id] = node;
+            late final StaticCollisionIndex collisionIndex;
             try {
               await onChunkPrepare?.call(node);
+              collisionIndex = await StaticCollisionIndex.fromNode(node);
               if (!_wanted.contains(chunk.id) ||
                   !identical(_preparing[chunk.id], node)) {
                 return null;
@@ -124,6 +193,7 @@ class DistrictStreamer {
               _preparing.remove(chunk.id);
             }
             _loaded[chunk.id] = node;
+            _collision[node] = collisionIndex;
             // Здания/дороги внутри чанка не меняются, пока он смонтирован
             // (снимается тем же scene.remove(), что и добавлялся) — безопасный
             // случай для shadowStatic: движок кеширует тень вместо перекодирования

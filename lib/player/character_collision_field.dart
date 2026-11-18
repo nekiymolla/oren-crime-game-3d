@@ -106,10 +106,14 @@ class CharacterCollisionField {
     vm.Vector3 direction,
     double maxDistance,
   ) {
-    final ray = vm.Ray.originDirection(origin, direction);
-    SceneRaycastHit? nearest;
+    CharacterRayHit? nearest;
     for (final root in _candidates) {
-      final hit = raycastNode(root, ray, maxDistance: maxDistance);
+      final hit = districtStreamer.castRoot(
+        root,
+        origin,
+        direction,
+        nearest?.distance ?? maxDistance,
+      );
       if (hit != null && (nearest == null || hit.distance < nearest.distance)) {
         nearest = hit;
       }
@@ -121,10 +125,7 @@ class CharacterCollisionField {
     );
     if (additional != null) return additional;
     if (nearest == null) return null;
-    return CharacterRayHit(
-      distance: nearest.distance,
-      normal: nearest.worldNormal,
-    );
+    return CharacterRayHit(distance: nearest.distance, normal: nearest.normal);
   }
 }
 

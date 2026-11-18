@@ -231,3 +231,12 @@ fvm dart --packages=.dart_tool/package_config.json tools/qa/inspect_game.dart <v
 .dart_tool/hooks_runner может остаться от несовместимого Dart SDK. При
 `Invalid SDK hash` пересоздавать только кэш указанного build-hook/target,
 а не исходные ассеты. SDK IDE закреплён в .vscode/settings.json через FVM.
+
+
+### Производительность на macOS
+
+См. [PERFORMANCE.md](PERFORMANCE.md): AOT-автопроезды, CPU samples,
+пространственный индекс и отдельный учёт движущихся игровых кадров.
+Обычные --smoke/--desktop-smoke запускать в debug-сборке без PERF_BENCHMARK;
+VM evaluate не доступен для AOT. Profile-проезды не совмещать с тестами,
+сборками или компьютерными UI-действиями: они могут скрыть окно и сбросить замер.

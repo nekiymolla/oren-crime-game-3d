@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_scene/scene.dart';
 import 'streaming_diagnostics.dart';
 
@@ -113,4 +114,14 @@ Future<Node> loadDistrictChunk(DistrictChunk chunk) async {
   }
   node.add(streets);
   return node;
+}
+
+/// Warm the engine's shared immutable resource templates for this small
+/// desktop level. Instances are discarded; only nearby chunks join the scene.
+/// Keep the level bounded rather than trying to preload an entire future city.
+Future<void> prewarmDistrictTemplates(DistrictManifest manifest) async {
+  for (final chunk in manifest.cells) {
+    await loadDistrictChunk(chunk);
+    await SchedulerBinding.instance.endOfFrame;
+  }
 }

@@ -1,8 +1,46 @@
 {
   "version": "0.2.0",
   "configurations": [
-    {"name": "Crime Oren · macOS", "request": "launch", "type": "dart", "program": "lib/main.dart", "deviceId": "macos", "toolArgs": ["--enable-flutter-gpu"]},
-    {"name": "Crime Oren · Windows", "request": "launch", "type": "dart", "program": "lib/main.dart", "deviceId": "windows", "toolArgs": ["--enable-flutter-gpu"]},
-    {"name": "Crime Oren · телефон / симулятор", "request": "launch", "type": "dart", "program": "lib/main.dart", "toolArgs": ["--enable-flutter-gpu"]}
+    {
+      "name": "Crime Oren · macOS",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "macos",
+      "toolArgs": [
+        "--enable-flutter-gpu"
+      ],
+      "flutterMode": "profile"
+    },
+    {
+      "name": "Crime Oren · macOS · debug",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "macos",
+      "toolArgs": [
+        "--enable-flutter-gpu"
+      ],
+      "flutterMode": "debug"
+    },
+    {
+      "name": "Crime Oren · Windows",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "deviceId": "windows",
+      "toolArgs": [
+        "--enable-flutter-gpu"
+      ]
+    },
+    {
+      "name": "Crime Oren · телефон / симулятор",
+      "request": "launch",
+      "type": "dart",
+      "program": "lib/main.dart",
+      "toolArgs": [
+        "--enable-flutter-gpu"
+      ]
+    }
   ]
 }

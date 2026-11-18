@@ -16,6 +16,13 @@ import 'package:flutter/widgets.dart';
 /// [kDebugMode] в main.dart) — игрокам показываться не должен.
 class DebugOverlayController extends ChangeNotifier {
   final _lines = SplayTreeMap<String, String>();
+  final sceneFrameTimes = <int>[];
+  void recordSceneFrame(int timestamp) {
+    if (sceneFrameTimes.isNotEmpty && sceneFrameTimes.last == timestamp) return;
+    sceneFrameTimes.add(timestamp);
+    if (sceneFrameTimes.length > 120) sceneFrameTimes.removeAt(0);
+  }
+
   bool _visible = false;
 
   bool get visible => _visible;
@@ -89,9 +96,11 @@ class _FpsOverlayState extends State<FpsOverlay> {
   void _recompute() {
     if (!mounted || _recent.isEmpty) return;
     final metrics = measureFrames(
-      _recent
-          .map((t) => t.timestampInMicroseconds(FramePhase.vsyncStart))
-          .toList(),
+      widget.controller.sceneFrameTimes.length > 1
+          ? widget.controller.sceneFrameTimes
+          : _recent
+                .map((t) => t.timestampInMicroseconds(FramePhase.vsyncStart))
+                .toList(),
       _recent.map((t) => t.totalSpan.inMicroseconds).toList(),
     );
     var ui = 0.0;

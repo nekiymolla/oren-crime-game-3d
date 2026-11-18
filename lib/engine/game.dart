@@ -1,3 +1,4 @@
+import 'debug/performance_probe.dart';
 import 'dart:math' as math;
 
 import 'package:flutter_scene/scene.dart';
@@ -8,6 +9,7 @@ import '../characters/character_animation.dart';
 import '../characters/character_library.dart';
 import '../characters/character_model.dart';
 import '../core/game_mode.dart';
+import '../core/platform.dart';
 import '../core/input/input_state.dart';
 import '../economy/pickups.dart';
 import '../economy/pickups_view.dart';
@@ -355,6 +357,9 @@ class Game {
 
     worldConfig = await loadWorldConfig();
     final districtManifest = await loadDistrictManifest();
+    if (desktopControls && districtManifest.cells.length <= 64) {
+      await prewarmDistrictTemplates(districtManifest);
+    }
     final vegetation = VegetationBatch(maxTrees: quality.maxTrees);
     vegetation.groundHeightAt = terrain.heightAt;
     vegetation.groundClearance = (x, z, radius) =>
@@ -603,6 +608,30 @@ class Game {
     // Последним: сохранение перекрывает стартовые значения всего выше.
     final save = await _saveStore.read();
     if (save != null) _applySave(save);
+    await _warmUpScene();
+  }
+
+  Future<void> _warmUpScene() async {
+    final hour = clock.hours;
+    try {
+      // Prepare both lighting pipelines and all loaded meshes behind the
+      // loading screen, rather than compiling a night variant during a drive.
+      for (final lightHour in [13.0, 23.0, hour]) {
+        clock.hours = lightHour;
+        tick(0);
+        scene.update(0);
+        final camera = scene.camera;
+        if (camera != null) {
+          await scene.warmUp([
+            RenderView(camera: camera),
+          ], includeOffscreen: true);
+        }
+      }
+    } finally {
+      clock.hours = hour;
+      tick(0);
+      scene.update(0);
+    }
   }
 
   /// Снимок прогресса для сохранения.
@@ -1092,10 +1121,14 @@ class Game {
       }
     }
 
-    final ray = vm.Ray.originDirection(origin, direction);
     double? nearest;
     for (final root in _bulletCandidates) {
-      final hit = raycastNode(root, ray, maxDistance: nearest ?? maxDistance);
+      final hit = districtStreamer.castRoot(
+        root,
+        origin,
+        direction,
+        nearest ?? maxDistance,
+      );
       if (hit != null && (nearest == null || hit.distance < nearest)) {
         nearest = hit.distance;
       }
@@ -1258,6 +1291,128 @@ class Game {
 
   /// Общая для всей игры логика тика (таймеры, спавн и т.д.), не привязанная
   /// к одному узлу. Per-node поведение живёт в компонентах, а не здесь.
+  void Function()? onPerformanceScenarioChanged;
+  bool _performanceValidated = false;
+  late final performanceProbe = PerformanceProbe(this);
+
+  // Developer benchmark only; never called in ordinary builds.
+  void configurePerformanceScenario(String variant) {
+    if (!_performanceValidated) {
+      // ignore: avoid_print
+      print(
+        'PERF collision parity: ${districtStreamer.validateCollisionIndex()}',
+      );
+      _performanceValidated = true;
+    }
+    districtStreamer.indexedCollision = variant != 'legacy-drive';
+    clock.hours = variant.startsWith('night') ? 23 : 13;
+    clock.gameMinutesPerSecond = 0;
+    scene.renderScale = variant == 'half-resolution' ? .5 : quality.renderScale;
+    _sunLight?.castsShadow = variant != 'no-shadows' && quality.shadowsEnabled;
+    if (variant == 'idle') {
+      // ignore: avoid_print
+      print(
+        'PERF collision parity: ${districtStreamer.validateCollisionIndex()}',
+      );
+      return;
+    }
+    _hookCrashSound(vehicle);
+    // Pick a clear starting stretch, retaining every traffic actor and
+    // collision. Otherwise later phases can start directly behind a queue.
+    var startZ = 42.0, best = -1.0;
+    final trafficPositions = [
+      ...traffic.carNodes,
+      ..._decorCars,
+      ...policeSystem.unitNodes,
+    ].map((n) => n.globalTransform.getTranslation()).toList();
+    for (final z in [42.0, 90.0, 140.0, 190.0, 240.0, 290.0, 340.0]) {
+      var clearance = 200.0;
+      for (final car in trafficPositions) {
+        final ahead = car.z - z;
+        if (ahead > -8 &&
+            ahead < 200 &&
+            (car.x - (_performanceRoadX(car.z) - 1.75)).abs() < 3) {
+          clearance = math.min(clearance, math.max(0, ahead));
+        }
+      }
+      if (clearance > best) {
+        best = clearance;
+        startZ = z;
+      }
+    }
+    vehicle.node.position = vm.Vector3(
+      _performanceRoadX(startZ) - 1.75,
+      0,
+      startZ,
+    );
+    vehicle.controller
+      ..heading = .065
+      ..velocityXZ.setZero();
+    vehicle.controller.dynamics.stopYaw();
+    gameModeState
+      ..mode = ControlMode.driving
+      ..activeVehicle = vehicle.controller;
+    _playerMeshNode?.visible = false;
+    cameraController.followTarget = vehicle.node;
+    onPerformanceScenarioChanged?.call();
+    cameraController.orbitBy(
+      .065 - cameraController.yaw,
+      .2 - cameraController.pitch,
+    );
+  }
+
+  void finishPerformanceScenario() {
+    inputState.setMove(0, 0);
+    applyQuality(quality);
+    clock.gameMinutesPerSecond = 1;
+  }
+
+  static const _performanceRoad = [
+    (-72.95, 27.67),
+    (-66.85, 116.7),
+    (-61.28, 197.97),
+    (-56.11, 266.78),
+    (-52.36, 321.35),
+    (-49.16, 373.11),
+    (-45.13, 474.46),
+    (-39.5, 544.63),
+    (-36.36, 596.57),
+    (-34.44, 623.73),
+    (-29.48, 699.35),
+    (-26.35, 746.89),
+    (-24.03, 776.88),
+    (-19.55, 801.49),
+  ];
+  double _performanceRoadX(double z) {
+    for (var i = 1; i < _performanceRoad.length; i++) {
+      final a = _performanceRoad[i - 1], b = _performanceRoad[i];
+      if (z <= b.$2) {
+        final t = ((z - a.$2) / (b.$2 - a.$2)).clamp(0.0, 1.0);
+        return a.$1 + (b.$1 - a.$1) * t;
+      }
+    }
+    return _performanceRoad.last.$1;
+  }
+
+  void setPerformanceThrottle() {
+    // Keep the route running: arrest/death is covered by gameplay smoke,
+    // not by this isolated driving/render comparison.
+    wantedState.stars = 0;
+    playerHealth.health = PlayerHealth.maxHealth;
+    // Pure pursuit along the mapped Ilekskaya centreline, in its northbound
+    // TrafficNetwork lane (rightOf(+Z) is -X in the current network). Straight throttle alone drifts into oncoming traffic as it bends.
+    final p = vehicle.node.position;
+    final targetZ = p.z + 15 + vehicle.controller.speed * .6;
+    final targetX = _performanceRoadX(targetZ);
+    final yaw = math.atan2(targetX - 1.75 - p.x, targetZ - p.z);
+    final error =
+        (yaw - vehicle.controller.heading + math.pi) % (2 * math.pi) - math.pi;
+    inputState.setMove(
+      (error * 4).clamp(-1, 1),
+      vehicle.controller.speed > 22 ? .25 : 1,
+    );
+  }
+
   void tick(double deltaSeconds) {
     final trackedPosition = trackedNode.globalTransform.getTranslation();
     districtStreamer.updateAroundPosition(trackedPosition);
@@ -1678,10 +1833,11 @@ class Game {
     districtStreamer.collectChunksOverlapping(bounds, roots);
     double? nearest;
     for (final root in roots) {
-      final hit = raycastNode(
+      final hit = districtStreamer.castRoot(
         root,
-        vm.Ray.originDirection(origin, direction),
-        maxDistance: nearest ?? reach,
+        origin,
+        direction,
+        nearest ?? reach,
       );
       if (hit != null) nearest = hit.distance;
     }

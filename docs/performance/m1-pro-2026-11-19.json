@@ -1,0 +1,81 @@
+{
+  "date": "2026-11-19",
+  "device": "Apple M1 Pro, 14-core GPU",
+  "mode": "Flutter 3.47.4 profile / Metal",
+  "baselineCommit": "d95f758",
+  "scenarioSeconds": 15,
+  "warmupSeconds": 3,
+  "metric": "3D paint callbacks, not HUD vsync count; not hardware presentation telemetry",
+  "desktopPixelBudget": {
+    "day": 2304000,
+    "night": 1800000
+  },
+  "templatePrecacheChunks": 43,
+  "processResidentKiBSample": 737456,
+  "results": [
+    {
+      "scenario": "drive",
+      "movingSamples": 719,
+      "movingFps": 59.99988150232034,
+      "movingP95Ms": 16.667,
+      "sceneFrames": 720,
+      "flutterFrames": 1441,
+      "fps": 59.99988150232056,
+      "p95Ms": 16.667,
+      "maxMs": 16.671,
+      "over25Ms": 0,
+      "uiMs": 3.822380291464261,
+      "rasterMs": 0.45943025676613464,
+      "speed": 22.061329824598147,
+      "position": "[-49.084861755371094,0.0,414.0564880371094]"
+    },
+    {
+      "scenario": "night-drive",
+      "movingSamples": 674,
+      "movingFps": 59.99987893199503,
+      "movingP95Ms": 16.667,
+      "sceneFrames": 720,
+      "flutterFrames": 1438,
+      "fps": 59.99988150232058,
+      "p95Ms": 16.667,
+      "maxMs": 16.668,
+      "over25Ms": 0,
+      "uiMs": 3.4791175243393604,
+      "rasterMs": 0.4622705146036161,
+      "speed": 20.767422172133237,
+      "position": "[-58.78035354614258,0.0,254.55238342285156]"
+    },
+    {
+      "scenario": "drive-repeat",
+      "movingSamples": 719,
+      "movingFps": 59.99988150232035,
+      "movingP95Ms": 16.667,
+      "sceneFrames": 720,
+      "flutterFrames": 1438,
+      "fps": 59.99988150232056,
+      "p95Ms": 16.667,
+      "maxMs": 16.67,
+      "over25Ms": 0,
+      "uiMs": 3.4734840055632823,
+      "rasterMs": 0.4631383866481224,
+      "speed": 22.05274407273175,
+      "position": "[-47.28706359863281,0.0,464.8624267578125]"
+    },
+    {
+      "scenario": "night-repeat",
+      "movingSamples": 717,
+      "movingFps": 59.87461904042956,
+      "movingP95Ms": 16.667,
+      "sceneFrames": 718,
+      "flutterFrames": 1432,
+      "fps": 59.874619040429785,
+      "p95Ms": 16.667,
+      "maxMs": 25.0,
+      "over25Ms": 0,
+      "uiMs": 3.9254092178770947,
+      "rasterMs": 0.4571117318435754,
+      "speed": 22.066014300536725,
+      "position": "[-54.39775466918945,0.0,316.1985168457031]"
+    }
+  ]
+}

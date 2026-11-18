@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'package:flutter/scheduler.dart';
+import 'engine/debug/performance_probe.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,6 +22,18 @@ Future<void> main() async {
     ]);
   }
   runApp(const CrimeOrenApp());
+  if (PerformanceProbe.enabled) {
+    Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (PerformanceProbe.completed) {
+        timer.cancel();
+        return;
+      }
+      // ignore: avoid_print
+      print(
+        'PERF lifecycle=${WidgetsBinding.instance.lifecycleState} framesEnabled=${SchedulerBinding.instance.framesEnabled}',
+      );
+    });
+  }
 }
 
 class CrimeOrenApp extends StatelessWidget {
@@ -42,7 +57,9 @@ class GameRoot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final content = GameHud(debugOverlay: _debugOverlayController);
+    final content = GameHud(
+      debugOverlay: kReleaseMode ? null : _debugOverlayController,
+    );
 
     // !kReleaseMode, а не kDebugMode: производительность имеет смысл мерить
     // только в --profile (debug-числа ничего не значат — ассерты, нет AOT),

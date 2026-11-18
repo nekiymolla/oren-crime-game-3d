@@ -220,7 +220,6 @@ class PedestrianSystem implements ShootTargets {
     }
 
     var hits = 0;
-    final canHit = vehiclePosition != null && vehicleSpeed >= hitSpeedThreshold;
     final hitRadiusSq = _hitRadius * _hitRadius;
     final despawnRadiusSq = despawnRadius * despawnRadius;
     for (var i = 0; i < _pedestrians.length; i++) {
@@ -236,7 +235,8 @@ class PedestrianSystem implements ShootTargets {
 
       // Лежачего (и мёртвого) повторно не сбить и не засчитать второй раз
       // в розыск.
-      if (canHit &&
+      if (vehiclePosition != null &&
+          vehicleSpeed >= hitSpeedThreshold &&
           !pedestrian.isKnockedDown &&
           !pedestrian.isDead &&
           (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {

@@ -1874,3 +1874,25 @@ Validation: 247 Flutter tests pass; analyzer has only the three existing
 info messages; street geometry/layout and start-block validators pass.
 Cold macOS Metal build and general gameplay smoke pass. Inspected courtyards
 in daylight and an entrance lamp at 23:00; facade shader reports no failure.
+
+2026-11-19 — desktop performance pass:
+- Baseline city/physics/controls saved and pushed as d95f758 before optimisation.
+- Static streamed triangles now use an off-isolate BVH for walking, camera,
+  vehicle sweeps and bullets. Dynamic cars retain mesh queries. Index is ready
+  before chunk attachment; runtime parity checked against engine raycasts.
+- Explicit 60 Hz pacing handles 60/90/120/144 Hz displays. A repaint boundary
+  isolates HUD updates; render callbacks count actual 3D paints. Incidental
+  paints and pause do not advance implicit wall-clock simulation.
+- Desktop pixel budget: 2.304M day / 1.8M night, HUD at native density.
+  The 43-chunk level preloads shared templates during loading (bounded to 64
+  chunks); nearby node streaming remains unchanged. Day/night pipelines warm
+  before gameplay. More upfront RAM/loading in exchange for no cold resource
+  imports during these driving tests.
+- Four M1 Pro AOT/Metal driving phases: 59.87–60.00 FPS moving, p95 16.667 ms,
+  worst frame 25.0 ms, no intervals over 25.1 ms. End speeds 74.8–79.4 km/h.
+  Raw results and test limits: docs/PERFORMANCE.md and docs/performance/.
+- 255 tests pass; analyzer only three existing infos. macOS desktop smoke
+  (pause/resume/aim) and full gameplay smoke (camera, terrain, wheel contact,
+  acceleration/braking, cornering, handbrake and walls) pass. Night scene/HUD
+  visually inspected. Sound defaults OFF. IDE macOS launch defaults to profile;
+  debug remains available separately. No claims for untested devices/scenarios.

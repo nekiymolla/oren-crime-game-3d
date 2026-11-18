@@ -1,3 +1,4 @@
+import '../../engine/debug/performance_probe.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_scene/scene.dart' hide Material;
@@ -62,6 +63,11 @@ class _GameHudState extends State<GameHud> {
       if (mounted) setState(() => _minimap = map);
     }, onError: (Object _) {});
     game.load().then((_) {
+      if (PerformanceProbe.enabled) {
+        game.onPerformanceScenarioChanged = () {
+          if (mounted) setState(() {});
+        };
+      }
       if (mounted) setState(() => _ready = true);
     });
   }
@@ -110,7 +116,9 @@ class _GameHudState extends State<GameHud> {
       onInteract: _toggleVehicle,
       enabled: !_paused,
       onPause: () => _setPaused(!_paused),
-      onFocusLost: () => _setPaused(true),
+      onFocusLost: () {
+        if (!PerformanceProbe.enabled) _setPaused(true);
+      },
       onRest: game.restAtBench,
       onProperty: _useProperty,
       onSound: () => game.audio.muted = !game.audio.muted,
