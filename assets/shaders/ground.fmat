@@ -15,8 +15,16 @@ material {
   blending: opaque,
   culling: back,
   parameters: [
+    { type: vec4, name: street_lamp_0, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_1, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_2, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_3, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_4, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_5, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_6, default: [0, 0, 0, 0] },
+    { type: vec4, name: street_lamp_7, default: [0, 0, 0, 0] },
     { type: vec3, name: light_tint, default: [1, 1, 1] },
-    { type: float, name: brightness, default: 1.7 },
+    { type: float, name: brightness, default: 1.05 },
     { type: float, name: snow, default: 0 },
     { type: float, name: shadow_strength, default: 0.6 },
     { type: float, name: ao_strength, default: 0.6 },
@@ -26,8 +34,47 @@ material {
 }
 
 fragment {
-  // Видимость солнца (1 — свет, 0 — тень) — только каскады направленного
-  // света, без прожекторов: их на земле нет.
+  // Keep the complete shadow-catcher sampler contract on every backend.
+  // Based on flutter_scene shadow_catcher.fmat (MIT; see docs/licenses/flutter_scene-MIT.txt).
+  float CatcherSpotShadowVisibility(vec3 world_pos, vec3 n) {
+    float visibility = 1.0;
+#ifndef FLUTTER_SCENE_SKIP_SHADOWS
+    if (frag_info.spot_shadow_params.x > 0.5) {
+      int count = frag_info.punctual_dims.x < 0.5
+          ? 0
+          : int(frag_info.radiance_blend.z);
+      int offset = int(frag_info.radiance_blend.w);
+      for (int i = 0; i < MAX_PUNCTUAL_LIGHTS; i++) {
+        if (i >= count) break;
+        int light_row = int(FetchPunctualIndex(offset + i) + 0.5);
+        vec4 l0 = FetchPunctualTexel(light_row, 0);
+        // Spots only (type 2).
+        if (l0.w < 1.5 || l0.w > 2.5) continue;
+        vec4 l3 = FetchPunctualTexel(light_row, 3);
+        // Skip spots with no tile in the atlas.
+        if (l3.y < -0.5) continue;
+        vec4 l1 = FetchPunctualTexel(light_row, 1);
+        vec4 l2 = FetchPunctualTexel(light_row, 2);
+        vec3 to_light = l0.xyz - world_pos;
+        float dist_sq = dot(to_light, to_light);
+        vec3 light_dir = to_light * inversesqrt(max(dist_sq, 1e-8));
+        float inv_range = l1.w;
+        float range_factor = dist_sq * inv_range * inv_range;
+        float window = clamp(1.0 - range_factor * range_factor, 0.0, 1.0);
+        float cd = dot(normalize(l2.xyz), -light_dir);
+        float cone = clamp(cd * l2.w + l3.x, 0.0, 1.0);
+        float weight = window * window * cone * cone;
+        float spot_visibility =
+            SampleSpotShadow(light_row, int(l3.y + 0.5), world_pos, n);
+        visibility *= 1.0 - weight * (1.0 - spot_visibility);
+      }
+    }
+#endif
+    return visibility;
+  }
+
+  // Match the engine binder, including optional shadow-casting spots.
+  // Dropping punctual samplers makes Metal bind an optimized-out slot.
   float SunVisibility(vec3 world_pos, vec3 n) {
     float visibility = 1.0;
 #ifndef FLUTTER_SCENE_SKIP_SHADOWS
@@ -37,7 +84,13 @@ fragment {
       if (facing > 0.0) visibility = mix(1.0, SampleShadow(world_pos, n), facing);
     }
 #endif
-    return visibility;
+    return visibility * CatcherSpotShadowVisibility(world_pos, n);
+  }
+
+  float StreetLamp(vec3 p, vec4 lamp) {
+    float distanceSquared = dot(p.xz - lamp.xy, p.xz - lamp.xy);
+    float pool = max(0.0, 1.0 - distanceSquared / max(1.0, lamp.z * lamp.z));
+    return pool * pool * lamp.w;
   }
 
   void Surface(inout MaterialInputs material) {
@@ -56,6 +109,9 @@ fragment {
     vec3 albedo = mix(mix(grass, grass2, 0.45), dirt, patches * 0.75);
     // Чуть разной яркости участки — газон не одного тона.
     albedo *= mix(0.85, 1.12, texture(grass_texture, p.xz / 60.0).g);
+    // Dry urban grass: retain texture without the bright yellow-green cast.
+    float luminance = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+    albedo = mix(vec3(luminance), albedo, 0.72);
 
     // Снег: ложится сначала на траву, проплешины белеют последними.
     float snowMask = clamp(material_params.snow * 1.25 - patches * 0.25 * (1.0 - material_params.snow), 0.0, 1.0);
@@ -71,7 +127,19 @@ fragment {
 #endif
     float shade = (1.0 - material_params.shadow_strength * (1.0 - visibility)) *
         (1.0 - material_params.ao_strength * (1.0 - occlusion));
-    vec3 color = albedo * material_params.light_tint * material_params.brightness * shade;
+    // Broad slope shading makes low relief readable without full PBR/IBL.
+    float reliefShade = clamp(1.0 + dot(n.xz, vec2(-0.45, 0.35)), 0.72, 1.18);
+    vec3 color = albedo * material_params.light_tint * material_params.brightness * shade * reliefShade;
+    // Lightweight matching pools on shadow-catcher grass; streets/cars use spot lights.
+    float streetLight = StreetLamp(p, material_params.street_lamp_0) +
+        StreetLamp(p, material_params.street_lamp_1) +
+        StreetLamp(p, material_params.street_lamp_2) +
+        StreetLamp(p, material_params.street_lamp_3) +
+        StreetLamp(p, material_params.street_lamp_4) +
+        StreetLamp(p, material_params.street_lamp_5) +
+        StreetLamp(p, material_params.street_lamp_6) +
+        StreetLamp(p, material_params.street_lamp_7);
+    color += albedo * vec3(1.0, 0.72, 0.38) * streetLight;
     material.base_color = vec4(color, 1.0);
     PrepareMaterial(material);
   }

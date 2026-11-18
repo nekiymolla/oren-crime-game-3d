@@ -28,6 +28,7 @@ import 'character_motion.dart';
 class CharacterCollisionField {
   CharacterCollisionField({
     required this.districtStreamer,
+    this.additionalRaycast,
     this.probeRadiusMeters = 2.0,
     this.probeBelowMeters = 1.5,
     this.probeAboveMeters = 2.5,
@@ -36,6 +37,7 @@ class CharacterCollisionField {
   /// Источник загруженных чанков района — вся статическая коллизионная
   /// геометрия игры (здания, дороги) лежит в них.
   final DistrictStreamer districtStreamer;
+  final CharacterRaycaster? additionalRaycast;
 
   /// Полуразмер коробки отбора вокруг персонажа. С запасом покрывает и луч
   /// на землю, и кольцо лучей обхода (радиус тела 0.5 +
@@ -112,6 +114,12 @@ class CharacterCollisionField {
         nearest = hit;
       }
     }
+    final additional = additionalRaycast?.call(
+      origin,
+      direction,
+      nearest?.distance ?? maxDistance,
+    );
+    if (additional != null) return additional;
     if (nearest == null) return null;
     return CharacterRayHit(
       distance: nearest.distance,

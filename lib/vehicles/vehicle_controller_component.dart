@@ -3,22 +3,24 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
-/// Kinematic-модель вождения "в духе" GTA — не настоящая rigid-body физика
-/// (подвески/столкновений нет), но с нелинейным разгоном, зависящим от
-/// скорости рулением и заносом на резких поворотах на скорости, чтобы
-/// управление ощущалось увесисто, а не как игрушечная тележка.
-///
-/// Настоящая физика столкновений/подвески — апгрейд на flutter_scene_rapier
-/// после того, как этот пакет выйдет из experimental-статуса (см. README
-/// пакета: сейчас там нет готового компонента "машина", только rigid body +
-/// joints, из которых её пришлось бы собирать с нуля).
+import '../player/character_motion.dart'
+    show CharacterRaycaster, CharacterRayHit;
+import 'vehicle_dynamics.dart';
+import 'wheel_contact.dart';
+import 'vehicle_sweep.dart';
+
+/// Two-axle tyre forces and yaw inertia, terrain contact and sprung body.
+/// This is a planar handling model with swept collision probes; it does
+/// not simulate a full 3D rigid body, airborne suspension or deformation.
 class VehicleControllerComponent extends Component {
   VehicleControllerComponent({
     required this.maxSpeed,
     required this.acceleration,
     required this.braking,
     double? reverseMaxSpeed,
-    this.drag = 3.0,
+    this.drag = 0.32,
+    this.mass = 1450,
+    this.tyreFriction = 1.0,
     this.maxSteerAngle = 0.55,
     this.wheelBase = 2.6,
     this.groundPlaneHeight = 0.0,
@@ -44,6 +46,37 @@ class VehicleControllerComponent extends Component {
 
   /// Пассивное замедление накатом (без газа/тормоза), м/с².
   double drag;
+  double mass, tyreFriction;
+  final VehicleDynamics dynamics = VehicleDynamics();
+  Node? sprungBody;
+  List<Node> wheelNodes = const [];
+  List<vm.Vector3> _wheelRest = const [];
+  double suspensionTravel = .18;
+  late List<vm.Vector3> contactAnchors = [
+    vm.Vector3(-bodyHalfWidth * .81, 0, wheelBase / 2),
+    vm.Vector3(bodyHalfWidth * .81, 0, wheelBase / 2),
+    vm.Vector3(-bodyHalfWidth * .81, 0, -wheelBase / 2),
+    vm.Vector3(bodyHalfWidth * .81, 0, -wheelBase / 2),
+  ];
+  WheelContact? groundContact;
+
+  void configureWheels(List<Node> wheels) {
+    wheelNodes = wheels;
+    _wheelRest = [for (final wheel in wheels) wheel.position.clone()];
+    if (wheels.length == 4) {
+      contactAnchors = [for (final p in _wheelRest) p.clone()..y = 0];
+    } else if (wheels.length == 3) {
+      final track = (_wheelRest[0].x - _wheelRest[1].x).abs() / 2;
+      contactAnchors = [
+        _wheelRest[0].clone()..y = 0,
+        _wheelRest[1].clone()..y = 0,
+        vm.Vector3(-track, 0, _wheelRest[2].z),
+        vm.Vector3(track, 0, _wheelRest[2].z),
+      ];
+    }
+  }
+
+  bool _handbrake = false;
 
   /// Максимальный угол поворота колёс, рад.
   double maxSteerAngle;
@@ -53,6 +86,10 @@ class VehicleControllerComponent extends Component {
 
   /// Заглушка вместо raycast до земли, пока нет rigid-body физики.
   double? groundPlaneHeight;
+  double Function(double, double)? groundHeightAt;
+  double _terrainPitch = 0, _terrainRoll = 0;
+  CharacterRaycaster? obstacleRaycast;
+  void Function(vm.Vector3 position)? prepareObstacles;
 
   /// Насколько быстро продольная скорость "прилипает" к направлению носа
   /// машины на низкой/высокой скорости — ниже значение на высокой скорости
@@ -79,6 +116,15 @@ class VehicleControllerComponent extends Component {
   /// колбэк просто сообщает наружу, что произошло и насколько сильно.
   void Function(double impactSpeed)? onCollision;
 
+  /// Extra simple obstacles not represented by raycastable scene meshes.
+  double? Function(
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double distance,
+    double radius,
+  )?
+  additionalObstacleSweep;
+
   /// Скорость машины как вектор в мировых XZ (не всегда совпадает с
   /// направлением носа — расхождение и есть занос).
   vm.Vector2 velocityXZ = vm.Vector2.zero();
@@ -91,6 +137,13 @@ class VehicleControllerComponent extends Component {
   double heading = 0.0;
   double _throttleInput = 0.0;
   double _steerInput = 0.0;
+  double _steering = 0.0;
+
+  /// Actual wheel angle, limited at speed to keep full touch input usable.
+  double get steeringAngle {
+    final limit = math.atan(8.0 * wheelBase / math.max(1.0, speed * speed));
+    return _steering * math.min(maxSteerAngle, limit);
+  }
 
   double get speed => velocityXZ.length;
 
@@ -103,7 +156,12 @@ class VehicleControllerComponent extends Component {
     return (1.0 - align).clamp(0.0, 1.0);
   }
 
-  void setInput({required double throttle, required double steer}) {
+  void setInput({
+    required double throttle,
+    required double steer,
+    bool handbrake = false,
+  }) {
+    _handbrake = handbrake;
     _throttleInput = throttle.clamp(-1.0, 1.0);
     _steerInput = steer.clamp(-1.0, 1.0);
   }
@@ -131,49 +189,41 @@ class VehicleControllerComponent extends Component {
 
   @override
   void fixedUpdate(double fixedDt) {
-    final dt = fixedDt;
+    // A stalled debug frame must not teleport a car through a whole block.
+    final dt = math.min(fixedDt, 0.05);
     if (dt <= 0.0 || !isAttached) return;
 
-    final forward = vm.Vector2(math.sin(heading), math.cos(heading));
-    var forwardSpeed = velocityXZ.dot(forward);
+    final steeringRate = _steerInput.abs() < _steering.abs() ? 8.0 : 5.0;
+    _steering +=
+        (_steerInput - _steering) * (1.0 - math.exp(-steeringRate * dt));
 
-    // 1. Продольная динамика вдоль носа машины.
-    if (_throttleInput.abs() > 0.02) {
-      if (_throttleInput > 0) {
-        forwardSpeed += acceleration * _throttleInput * dt;
-      } else {
-        // Тормоз, если едем вперёд; иначе — разгон назад.
-        if (forwardSpeed > 0.05) {
-          forwardSpeed = math.max(0, forwardSpeed + braking * _throttleInput * dt);
-        } else {
-          forwardSpeed += acceleration * 0.6 * _throttleInput * dt;
-        }
-      }
-      forwardSpeed = forwardSpeed.clamp(-reverseMaxSpeed, maxSpeed);
-    } else {
-      final decel = drag * dt;
-      if (forwardSpeed > 0) {
-        forwardSpeed = math.max(0, forwardSpeed - decel);
-      } else if (forwardSpeed < 0) {
-        forwardSpeed = math.min(0, forwardSpeed + decel);
-      }
+    final previousHeading = heading;
+    final steps = (dt / (1 / 120)).ceil();
+    for (var i = 0; i < steps; i++) {
+      heading = dynamics.integrate(
+        dt: dt / steps,
+        velocity: velocityXZ,
+        heading: heading,
+        steering: steeringAngle,
+        throttle: _throttleInput,
+        handbrake: _handbrake,
+        mass: mass,
+        wheelbase: wheelBase,
+        maxSpeed: maxSpeed,
+        reverseMaxSpeed: reverseMaxSpeed,
+        acceleration: acceleration,
+        braking: braking,
+        drag: drag,
+        tyreFriction: tyreFriction,
+      );
     }
-
-    // 2. Руление — велосипедная модель; радиус разворота зависит от скорости.
-    if (forwardSpeed.abs() > 0.05) {
-      final turnRate = (forwardSpeed / wheelBase) * math.tan(_steerInput * maxSteerAngle);
-      heading += turnRate * dt;
-    }
-
-    // 3. Занос: на низкой скорости сцепление почти полное (вектор скорости
-    // мгновенно доворачивается за носом), на высокой — падает, и вектор
-    // скорости "отстаёт" от разворота носа, машину сносит боком.
     final newForward = vm.Vector2(math.sin(heading), math.cos(heading));
-    final targetVelocity = newForward * forwardSpeed;
-    final speedFactor = (speed / driftThresholdSpeed).clamp(0.0, 1.0);
-    final grip = gripAtLowSpeed + (gripAtHighSpeed - gripAtLowSpeed) * speedFactor;
-    final gripT = 1.0 - math.exp(-grip * dt);
-    velocityXZ += (targetVelocity - velocityXZ) * gripT;
+    final body = sprungBody;
+    if (body != null) {
+      body.rotation =
+          vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), dynamics.bodyPitch) *
+          vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), dynamics.bodyRoll);
+    }
 
     // 4. Столкновения: щупаем три точки бампера (центр + оба края) вдоль
     // направления движения и останавливаем машину перед препятствием вместо
@@ -181,44 +231,114 @@ class VehicleControllerComponent extends Component {
     final currentPos = (node.globalTransform * vm.Vector4(0, 0, 0, 1)).xyz;
     var moveDelta = vm.Vector3(velocityXZ.x, 0, velocityXZ.y) * dt;
     final moveDist = moveDelta.length;
-    if (moveDist > 1e-5) {
-      final moveDir = moveDelta.normalized();
-      final movingForward = newForward.x * moveDir.x + newForward.y * moveDir.z >= 0;
-      final bumperCenter = newForward * (movingForward ? bodyHalfLength : -bodyHalfLength);
-      final right = vm.Vector2(newForward.y, -newForward.x);
-      final probeHeight = vm.Vector3(0, collisionProbeHeight, 0);
-
-      var closestDistance = moveDist;
-      for (final lateralOffset in [-bodyHalfWidth, 0.0, bodyHalfWidth]) {
-        final probeStart = currentPos +
-            vm.Vector3(bumperCenter.x, 0, bumperCenter.y) +
-            vm.Vector3(right.x, 0, right.y) * lateralOffset +
-            probeHeight;
+    if (moveDist > 1e-5 || (heading - previousHeading).abs() > 1e-5) {
+      prepareObstacles?.call(currentPos);
+      CharacterRayHit? cast(
+        vm.Vector3 origin,
+        vm.Vector3 direction,
+        double reach,
+      ) {
+        final custom = obstacleRaycast;
+        if (custom != null) return custom(origin, direction, reach);
         final hit = raycastNode(
           _rootNode,
-          vm.Ray.originDirection(probeStart, moveDir),
-          maxDistance: moveDist,
+          vm.Ray.originDirection(origin, direction),
+          maxDistance: reach,
           where: (n) => !_isExcluded(n),
         );
-        if (hit != null && hit.distance < closestDistance) {
-          closestDistance = hit.distance;
-        }
+        return hit == null
+            ? null
+            : CharacterRayHit(distance: hit.distance, normal: hit.worldNormal);
       }
 
-      if (closestDistance < moveDist) {
-        onCollision?.call(speed); // speed — ещё до обнуления velocityXZ ниже
-        moveDelta = moveDir * math.max(0.0, closestDistance - 0.05);
-        velocityXZ = vm.Vector2.zero();
+      final hit = sweepVehicleHull(
+        position: currentPos,
+        displacement: moveDelta,
+        oldHeading: previousHeading,
+        newHeading: heading,
+        halfWidth: bodyHalfWidth,
+        halfLength: bodyHalfLength,
+        probeHeight: collisionProbeHeight,
+        cast: cast,
+      );
+      var fraction = hit?.fraction ?? 1.0;
+      var collisionNormal = hit?.normal;
+      if (moveDist > 1e-5) {
+        final moveDir = moveDelta / moveDist;
+        final movingForward =
+            newForward.x * moveDir.x + newForward.y * moveDir.z >= 0;
+        final bumperCenter =
+            newForward * (movingForward ? bodyHalfLength : -bodyHalfLength);
+        final extra = additionalObstacleSweep?.call(
+          currentPos +
+              vm.Vector3(bumperCenter.x, collisionProbeHeight, bumperCenter.y),
+          moveDir,
+          moveDist,
+          bodyHalfWidth,
+        );
+        if (extra != null && extra / moveDist < fraction) {
+          fraction = ((extra - .05) / moveDist).clamp(0.0, 1.0);
+          collisionNormal = null;
+        }
+      }
+      if (fraction < 1) {
+        final normal = collisionNormal;
+        final n = normal == null ? null : vm.Vector2(normal.x, normal.z);
+        final into = n == null || n.length2 < .1
+            ? speed
+            : math.max(0.0, -velocityXZ.dot(n.normalized()));
+        onCollision?.call(into);
+        moveDelta *= fraction;
+        heading = previousHeading + (heading - previousHeading) * fraction;
+        if (n != null && n.length2 > .1) {
+          n.normalize();
+          final vn = velocityXZ.dot(n);
+          if (vn < 0) velocityXZ -= n * vn;
+          velocityXZ *= .78;
+        } else {
+          velocityXZ.setZero();
+        }
+        dynamics.stopYaw();
       }
     }
 
     // 5. Применяем смещение и поворот.
     final newPos = currentPos + moveDelta;
-    final groundY = groundPlaneHeight ?? newPos.y;
+    final height = groundHeightAt;
+    var groundY = groundPlaneHeight ?? newPos.y;
+    if (height != null) {
+      final contact = groundContact = WheelContact.sample(
+        x: newPos.x,
+        z: newPos.z,
+        heading: heading,
+        anchors: contactAnchors,
+        heightAt: height,
+      );
+      groundY = contact.height;
+      final blend = 1 - math.exp(-10 * dt);
+      _terrainPitch += (contact.pitch - _terrainPitch) * blend;
+      _terrainRoll += (contact.roll - _terrainRoll) * blend;
+    } else {
+      groundContact = null;
+      _terrainPitch = _terrainRoll = 0;
+    }
     final worldPos = vm.Vector3(newPos.x, groundY, newPos.z);
-    final worldRot = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), heading);
+    final worldRot =
+        vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), heading) *
+        vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), _terrainPitch) *
+        vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), _terrainRoll);
     final worldMat = vm.Matrix4.compose(worldPos, worldRot, node.scale);
 
+    if (height != null && wheelNodes.isNotEmpty) {
+      final upY = math.max(.5, worldMat.entry(1, 1));
+      for (var i = 0; i < wheelNodes.length; i++) {
+        final rest = _wheelRest[i];
+        final center = worldMat.transform3(rest.clone());
+        final shift = ((height(center.x, center.z) + rest.y - center.y) / upY)
+            .clamp(-suspensionTravel, suspensionTravel);
+        wheelNodes[i].position = rest + vm.Vector3(0, shift, 0);
+      }
+    }
     final parent = node.parent;
     if (parent != null) {
       final invParent = parent.globalTransform.clone()..invert();

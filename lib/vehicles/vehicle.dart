@@ -25,6 +25,7 @@ class VehicleDimensions {
     required this.wheelWidth,
     required this.paintColor,
     this.modelId,
+    this.wheelbase = 2.6,
   });
 
   /// Модель из assets/models/vehicles (см. [VehicleModels]); без неё или
@@ -32,6 +33,7 @@ class VehicleDimensions {
   /// у машин с моделью сняты с самой модели (prepare_vehicles.mjs) — по ним
   /// считаются столкновения.
   final String? modelId;
+  final double wheelbase;
 
   final double bodyWidth;
   final double chassisHeight;
@@ -61,6 +63,7 @@ class VehicleDimensions {
     wheelWidth: wheelWidth,
     paintColor: color,
     modelId: modelId,
+    wheelbase: wheelbase,
   );
 }
 
@@ -68,6 +71,22 @@ class VehicleDimensions {
 /// tools/assets/prepare_vehicles.mjs), высоты кабины — для процедурной
 /// сборки на случай, когда моделей нет (тесты).
 class VehicleArchetype {
+  /// First textured car. Existing traffic archetypes keep their assets.
+  static final classicSedan = VehicleDimensions(
+    bodyWidth: 1.786,
+    chassisHeight: 0.6,
+    bodyLength: 4.599,
+    cabinHeight: 0.52,
+    cabinLength: 2.05,
+    cabinWidth: 1.5,
+    cabinZOffset: -0.25,
+    wheelRadius: 0.3,
+    wheelWidth: 0.2,
+    paintColor: vm.Vector4(0.25, 0.4, 0.55, 1),
+    modelId: 'sedan_80',
+    wheelbase: 2.65,
+  );
+
   static final sedan = VehicleDimensions(
     bodyWidth: 1.81,
     chassisHeight: 0.6,
@@ -171,7 +190,14 @@ class VehicleArchetype {
   );
 
   /// Машины с моделью для трафика (полиция — отдельно).
-  static List<VehicleDimensions> get civilian => [sedan, hatchback, suv, sports, sports2, taxi];
+  static List<VehicleDimensions> get civilian => [
+    sedan,
+    hatchback,
+    suv,
+    sports,
+    sports2,
+    taxi,
+  ];
 }
 
 /// Процедурный плейсхолдер машины — низкий кузов + кабина сверху (сдвиг
@@ -221,7 +247,7 @@ class BuiltVehicle {
 }
 
 Future<BuiltVehicle> buildPlaceholderSedan() =>
-    buildVehicle(VehicleArchetype.sedan, vehicleId: 'car_sedan_01');
+    buildVehicle(VehicleArchetype.classicSedan, vehicleId: 'car_sedan_01');
 
 /// Запасные числа вождения — если [vehicleId] не задан или записи с таким
 /// id нет в assets/data/vehicles.json (сейчас там есть только car_sedan_01
@@ -229,8 +255,8 @@ Future<BuiltVehicle> buildPlaceholderSedan() =>
 /// вообще не проезжают через VehicleControllerComponent).
 const fallbackVehicleSpec = VehicleSpec(
   maxSpeedKmh: 200.0, // было 165 — см. PROGRESS.md
-  acceleration: 16.0, // было 8.2 — разгон ощущался вялым
-  braking: 32.0, // было 10.5 — торможение тянулось неприлично долго
+  acceleration: 5.8, // base handling for unconfigured stolen cars
+  braking: 9.8, // tyre-limited braking
 );
 
 /// Собирает управляемую машину — с контроллером вождения и системой
@@ -245,7 +271,9 @@ Future<BuiltVehicle> buildVehicle(
   String? vehicleId,
   bool attachPlayerInput = true,
 }) async {
-  final spec = (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ?? fallbackVehicleSpec;
+  final spec =
+      (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ??
+      fallbackVehicleSpec;
   return buildVehicleWithSpec(dims, spec, attachPlayerInput: attachPlayerInput);
 }
 
@@ -266,21 +294,32 @@ BuiltVehicle buildVehicleWithSpec(
   final node = Node();
 
   final bodyVariants = {
-    for (final level in DamageLevel.values) level: _buildBodyVariant(level, dims),
+    for (final level in DamageLevel.values)
+      level: _buildBodyVariant(level, dims),
   };
-  bodyVariants.values.forEach(node.add);
+  final bodyRoot = Node(name: 'SuspendedBody');
+  bodyVariants.values.forEach(bodyRoot.add);
+  node.add(bodyRoot);
   _addWheels(node, dims);
 
   final controller = VehicleControllerComponent(
     maxSpeed: spec.maxSpeedMs,
     acceleration: spec.acceleration,
     braking: spec.braking,
+    mass: spec.mass,
+    tyreFriction: spec.tyreFriction,
     groundPlaneHeight: 0.0,
+    wheelBase: dims.wheelbase,
     bodyHalfWidth: dims.bodyWidth / 2,
     bodyHalfLength: dims.bodyLength / 2,
   );
+  controller.sprungBody = bodyRoot;
+  final wheelSpin = node.getComponent<WheelSpinComponent>();
+  if (wheelSpin != null) controller.configureWheels(wheelSpin.wheels);
   node.addComponent(controller);
-  if (attachPlayerInput) node.addComponent(VehicleInputBridgeComponent(controller));
+  if (attachPlayerInput) {
+    node.addComponent(VehicleInputBridgeComponent(controller));
+  }
 
   return BuiltVehicle(
     node: node,
@@ -292,16 +331,18 @@ BuiltVehicle buildVehicleWithSpec(
 
 /// Общий материал целых фар всех машин (лениво — материалы создаются
 /// только после инициализации движка).
-PhysicallyBasedMaterial get _headlightMaterial => VehicleModels.headlightMaterial;
+PhysicallyBasedMaterial get _headlightMaterial =>
+    VehicleModels.headlightMaterial;
 
-const double _headlightDayStrength = 2.0;
-const double _headlightNightStrength = 9.0;
+const double _headlightDayStrength = 0.08;
+const double _headlightNightStrength = 4.0;
 
 /// Фары всех машин: днём тускло светятся, ночью горят (с bloom — ореол).
 /// [nightFactor] 0..1 из суточного цикла (lib/time/).
 void setHeadlightsGlow(double nightFactor) {
   _headlightMaterial.emissiveStrength =
-      _headlightDayStrength + (_headlightNightStrength - _headlightDayStrength) * nightFactor;
+      _headlightDayStrength +
+      (_headlightNightStrength - _headlightDayStrength) * nightFactor;
   // Габариты сзади ночью горят заметно, днём едва тлеют.
   VehicleModels.tailLightMaterial.emissiveStrength = 0.6 + 3.4 * nightFactor;
 }
@@ -322,30 +363,62 @@ void _addWheels(Node node, VehicleDimensions dims) {
   if (models != null && modelId != null && models.has(modelId)) {
     final wheels = models.wheels(modelId);
     wheels.forEach(node.add);
-    final wheelbase = wheels.length == 3 ? (wheels[0].position.z - wheels[2].position.z).abs() : 2.5;
-    node.addComponent(WheelSpinComponent(wheels, wheelRadius: dims.wheelRadius, wheelbase: wheelbase));
+    final wheelbase = wheels.length >= 3
+        ? (wheels[0].position.z - wheels[2].position.z).abs()
+        : 2.5;
+    node.addComponent(
+      WheelSpinComponent(
+        wheels,
+        wheelRadius: dims.wheelRadius,
+        wheelbase: wheelbase,
+      ),
+    );
     return;
   }
   final wheelMaterial = PhysicallyBasedMaterial()
     ..baseColorFactor = vm.Vector4(0.05, 0.05, 0.05, 1.0)
     ..roughnessFactor = 0.9;
-  final wheelRotation = vm.Quaternion.axisAngle(vm.Vector3(0, 0, 1), math.pi / 2);
+  final wheelRotation = vm.Quaternion.axisAngle(
+    vm.Vector3(0, 0, 1),
+    math.pi / 2,
+  );
 
   final wheelOffsets = [
-    vm.Vector3(dims.bodyWidth / 2, dims.wheelRadius, dims.bodyLength / 2 - dims.wheelRadius * 1.4),
-    vm.Vector3(-dims.bodyWidth / 2, dims.wheelRadius, dims.bodyLength / 2 - dims.wheelRadius * 1.4),
-    vm.Vector3(dims.bodyWidth / 2, dims.wheelRadius, -dims.bodyLength / 2 + dims.wheelRadius * 1.4),
-    vm.Vector3(-dims.bodyWidth / 2, dims.wheelRadius, -dims.bodyLength / 2 + dims.wheelRadius * 1.4),
+    vm.Vector3(
+      dims.bodyWidth / 2,
+      dims.wheelRadius,
+      dims.bodyLength / 2 - dims.wheelRadius * 1.4,
+    ),
+    vm.Vector3(
+      -dims.bodyWidth / 2,
+      dims.wheelRadius,
+      dims.bodyLength / 2 - dims.wheelRadius * 1.4,
+    ),
+    vm.Vector3(
+      dims.bodyWidth / 2,
+      dims.wheelRadius,
+      -dims.bodyLength / 2 + dims.wheelRadius * 1.4,
+    ),
+    vm.Vector3(
+      -dims.bodyWidth / 2,
+      dims.wheelRadius,
+      -dims.bodyLength / 2 + dims.wheelRadius * 1.4,
+    ),
   ];
   for (final offset in wheelOffsets) {
-    final wheel = Node(
-      mesh: Mesh(
-        CylinderGeometry(bottomRadius: dims.wheelRadius, topRadius: dims.wheelRadius, height: dims.wheelWidth),
-        wheelMaterial,
-      ),
-    )
-      ..position = offset
-      ..rotation = wheelRotation;
+    final wheel =
+        Node(
+            mesh: Mesh(
+              CylinderGeometry(
+                bottomRadius: dims.wheelRadius,
+                topRadius: dims.wheelRadius,
+                height: dims.wheelWidth,
+              ),
+              wheelMaterial,
+            ),
+          )
+          ..position = offset
+          ..rotation = wheelRotation;
     node.add(wheel);
   }
 }
@@ -384,7 +457,9 @@ Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
 
   final chassis = Node(
     mesh: Mesh(
-      CuboidGeometry(vm.Vector3(dims.bodyWidth, dims.chassisHeight, dims.bodyLength)),
+      CuboidGeometry(
+        vm.Vector3(dims.bodyWidth, dims.chassisHeight, dims.bodyLength),
+      ),
       paintMaterial,
     ),
   )..position = vm.Vector3(0, dims.wheelRadius + dims.chassisHeight / 2, 0);
@@ -399,16 +474,20 @@ Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
     ..baseColorFactor = cabinColor
     ..metallicFactor = 0.1
     ..roughnessFactor = level == DamageLevel.wrecked ? 0.6 : 0.15;
-  final cabin = Node(
-    mesh: Mesh(
-      CuboidGeometry(vm.Vector3(dims.cabinWidth, dims.cabinHeight, dims.cabinLength)),
-      cabinMaterial,
-    ),
-  )..position = vm.Vector3(
-      0,
-      dims.wheelRadius + dims.chassisHeight + dims.cabinHeight / 2,
-      dims.cabinZOffset,
-    );
+  final cabin =
+      Node(
+          mesh: Mesh(
+            CuboidGeometry(
+              vm.Vector3(dims.cabinWidth, dims.cabinHeight, dims.cabinLength),
+            ),
+            cabinMaterial,
+          ),
+        )
+        ..position = vm.Vector3(
+          0,
+          dims.wheelRadius + dims.chassisHeight + dims.cabinHeight / 2,
+          dims.cabinZOffset,
+        );
   variant.add(cabin);
 
   // Фары: damaged — левая разбита, wrecked — обе. Целые — общий на весь
@@ -420,17 +499,21 @@ Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
     ..roughnessFactor = 0.9;
   const headlightSize = 0.14;
   for (final side in [-1, 1]) {
-    final broken = level == DamageLevel.wrecked || (level == DamageLevel.damaged && side < 0);
-    final headlight = Node(
-      mesh: Mesh(
-        CuboidGeometry(vm.Vector3(headlightSize, headlightSize, 0.05)),
-        broken ? brokenHeadlightMaterial : workingHeadlightMaterial,
-      ),
-    )..position = vm.Vector3(
-        side * (dims.bodyWidth / 2 - headlightSize),
-        dims.wheelRadius + dims.chassisHeight / 2,
-        dims.bodyLength / 2,
-      );
+    final broken =
+        level == DamageLevel.wrecked ||
+        (level == DamageLevel.damaged && side < 0);
+    final headlight =
+        Node(
+            mesh: Mesh(
+              CuboidGeometry(vm.Vector3(headlightSize, headlightSize, 0.05)),
+              broken ? brokenHeadlightMaterial : workingHeadlightMaterial,
+            ),
+          )
+          ..position = vm.Vector3(
+            side * (dims.bodyWidth / 2 - headlightSize),
+            dims.wheelRadius + dims.chassisHeight / 2,
+            dims.bodyLength / 2,
+          );
     variant.add(headlight);
   }
 
@@ -442,16 +525,24 @@ Node _buildBodyVariant(DamageLevel level, VehicleDimensions dims) {
     final crumpleMaterial = PhysicallyBasedMaterial()
       ..baseColorFactor = vm.Vector4(0.08, 0.08, 0.08, 1.0)
       ..roughnessFactor = 0.95;
-    final crumple = Node(
-      mesh: Mesh(
-        CuboidGeometry(vm.Vector3(dims.bodyWidth * 0.9, dims.chassisHeight * 0.7, crumpleSize)),
-        crumpleMaterial,
-      ),
-    )..position = vm.Vector3(
-        0,
-        dims.wheelRadius + dims.chassisHeight / 2,
-        dims.bodyLength / 2 - crumpleSize / 2,
-      );
+    final crumple =
+        Node(
+            mesh: Mesh(
+              CuboidGeometry(
+                vm.Vector3(
+                  dims.bodyWidth * 0.9,
+                  dims.chassisHeight * 0.7,
+                  crumpleSize,
+                ),
+              ),
+              crumpleMaterial,
+            ),
+          )
+          ..position = vm.Vector3(
+            0,
+            dims.wheelRadius + dims.chassisHeight / 2,
+            dims.bodyLength / 2 - crumpleSize / 2,
+          );
     variant.add(crumple);
   }
 

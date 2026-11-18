@@ -6,10 +6,11 @@ import 'package:vector_math/vector_math.dart' as vm;
 import 'vehicle_damage.dart';
 
 /// Модели машин (assets/models/vehicles, готовит
-/// tools/assets/prepare_vehicles.mjs из Cars Bundle Quaternius, CC0).
+/// tools/assets/prepare_vehicles.mjs и prepare_classic_sedan.mjs;
+/// источники и лицензии — assets/models/CREDITS.md).
 ///
-/// Узлы модели: Body (кузов) и колёса Wheel_FL / Wheel_FR / Wheels_R
-/// (задние — одна ось) с опорной точкой в центре колеса. Материалы
+/// Узлы модели: Body (кузов), Wheel_FL / Wheel_FR и либо Wheels_R
+/// (задняя ось), либо отдельные Wheel_RL / Wheel_RR с опорной точкой в центре колеса. Материалы
 /// размечены ролями: Paint (перекрашивается), Glass, Headlights,
 /// TailLights, Siren_White / Siren_Blue (мигалка полиции).
 ///
@@ -22,15 +23,34 @@ class VehicleModels {
   static VehicleModels? instance;
 
   static const String modelsDir = 'assets/models/vehicles';
-  static const List<String> ids = ['sedan', 'hatchback', 'suv', 'sports', 'sports2', 'taxi', 'police'];
+  static const List<String> ids = [
+    'sedan',
+    'sedan_80',
+    'hatchback',
+    'suv',
+    'sports',
+    'sports2',
+    'taxi',
+    'police',
+  ];
 
-  static const List<String> wheelNames = ['Wheel_FL', 'Wheel_FR', 'Wheels_R'];
+  static const List<String> wheelNames = [
+    'Wheel_FL',
+    'Wheel_FR',
+    'Wheel_RL',
+    'Wheel_RR',
+    'Wheels_R',
+  ];
 
   final Map<String, Node> _templates;
 
   static Future<void> load() async {
-    final nodes = await Future.wait(ids.map((id) => loadScene('$modelsDir/$id.glb')));
-    instance = VehicleModels._({for (var i = 0; i < ids.length; i++) ids[i]: nodes[i]});
+    final nodes = await Future.wait(
+      ids.map((id) => loadScene('$modelsDir/$id.glb')),
+    );
+    instance = VehicleModels._({
+      for (var i = 0; i < ids.length; i++) ids[i]: nodes[i],
+    });
   }
 
   bool has(String id) => _templates.containsKey(id);
@@ -45,8 +65,18 @@ class VehicleModels {
       final material = switch (primitive.material.name) {
         'Paint' => paintMaterial,
         'Glass' => level == DamageLevel.wrecked ? _brokenGlass : _glass,
-        'Headlights' => level == DamageLevel.wrecked ? _brokenLight : headlightMaterial,
-        'TailLights' => level == DamageLevel.wrecked ? _brokenLight : tailLightMaterial,
+        'ClearGlass' => level == DamageLevel.wrecked ? _brokenGlass : null,
+        'BodyTextured' =>
+          level == DamageLevel.pristine
+              ? null
+              : _texturedDamage(
+                  primitive.material as PhysicallyBasedMaterial,
+                  level,
+                ),
+        'Headlights' =>
+          level == DamageLevel.wrecked ? _brokenLight : headlightMaterial,
+        'TailLights' =>
+          level == DamageLevel.wrecked ? _brokenLight : tailLightMaterial,
         'Siren_White' => sirenWhiteMaterial,
         'Siren_Blue' => sirenBlueMaterial,
         _ => null,
@@ -62,12 +92,41 @@ class VehicleModels {
       if (_templates[id]!.getChildByName(name) case final wheel?) wheel.clone(),
   ];
 
+  /// Keep the atlas, normal map and surface detail when damaging a textured
+  /// body; replacing it with flat paint would also erase handles and trim.
+  static PhysicallyBasedMaterial _texturedDamage(
+    PhysicallyBasedMaterial source,
+    DamageLevel level,
+  ) => PhysicallyBasedMaterial()
+    ..baseColorTexture = source.baseColorTexture
+    ..normalTexture = source.normalTexture
+    ..normalScale = source.normalScale
+    ..metallicRoughnessTexture = level == DamageLevel.wrecked
+        ? null
+        : source.metallicRoughnessTexture
+    ..occlusionTexture = source.occlusionTexture
+    ..doubleSided = source.doubleSided
+    ..baseColorFactor = level == DamageLevel.wrecked
+        ? vm.Vector4(0.08, 0.08, 0.08, 1)
+        : vm.Vector4(0.6, 0.6, 0.6, 1)
+    ..metallicFactor = level == DamageLevel.wrecked
+        ? 0.05
+        : source.metallicFactor
+    ..roughnessFactor = level == DamageLevel.wrecked
+        ? 0.95
+        : source.roughnessFactor;
+
   /// Краска: у целой — глянец с лаком, побитая темнее и матовее,
   /// сгоревшая — копоть.
   static PhysicallyBasedMaterial _paint(vm.Vector4 color, DamageLevel level) {
     final base = switch (level) {
       DamageLevel.pristine => color,
-      DamageLevel.damaged => vm.Vector4(color.x * 0.6, color.y * 0.6, color.z * 0.6, 1.0),
+      DamageLevel.damaged => vm.Vector4(
+        color.x * 0.6,
+        color.y * 0.6,
+        color.z * 0.6,
+        1.0,
+      ),
       DamageLevel.wrecked => vm.Vector4(0.05, 0.05, 0.05, 1.0),
     };
     return PhysicallyBasedMaterial()
@@ -97,27 +156,31 @@ class VehicleModels {
 
   /// Фары всех машин (общий материал: ночью включаются одной правкой, см.
   /// setHeadlightsGlow в vehicle.dart).
-  static final PhysicallyBasedMaterial headlightMaterial = PhysicallyBasedMaterial()
-    ..baseColorFactor = vm.Vector4(1.0, 0.98, 0.85, 1.0)
-    ..emissiveFactor = vm.Vector4(1.0, 0.95, 0.7, 1.0)
-    ..emissiveStrength = 2.0
-    ..roughnessFactor = 0.3;
+  static final PhysicallyBasedMaterial headlightMaterial =
+      PhysicallyBasedMaterial()
+        ..baseColorFactor = vm.Vector4(1.0, 0.98, 0.85, 1.0)
+        ..emissiveFactor = vm.Vector4(1.0, 0.95, 0.7, 1.0)
+        ..emissiveStrength = 2.0
+        ..roughnessFactor = 0.3;
 
-  static final PhysicallyBasedMaterial tailLightMaterial = PhysicallyBasedMaterial()
-    ..baseColorFactor = vm.Vector4(0.6, 0.02, 0.02, 1.0)
-    ..emissiveFactor = vm.Vector4(1.0, 0.05, 0.03, 1.0)
-    ..emissiveStrength = 0.6
-    ..roughnessFactor = 0.3;
+  static final PhysicallyBasedMaterial tailLightMaterial =
+      PhysicallyBasedMaterial()
+        ..baseColorFactor = vm.Vector4(0.6, 0.02, 0.02, 1.0)
+        ..emissiveFactor = vm.Vector4(1.0, 0.05, 0.03, 1.0)
+        ..emissiveStrength = 0.6
+        ..roughnessFactor = 0.3;
 
-  static final PhysicallyBasedMaterial sirenWhiteMaterial = PhysicallyBasedMaterial()
-    ..baseColorFactor = vm.Vector4(0.9, 0.9, 0.95, 1.0)
-    ..emissiveFactor = vm.Vector4(1.0, 0.1, 0.08, 1.0)
-    ..roughnessFactor = 0.3;
+  static final PhysicallyBasedMaterial sirenWhiteMaterial =
+      PhysicallyBasedMaterial()
+        ..baseColorFactor = vm.Vector4(0.9, 0.9, 0.95, 1.0)
+        ..emissiveFactor = vm.Vector4(1.0, 0.1, 0.08, 1.0)
+        ..roughnessFactor = 0.3;
 
-  static final PhysicallyBasedMaterial sirenBlueMaterial = PhysicallyBasedMaterial()
-    ..baseColorFactor = vm.Vector4(0.1, 0.2, 0.9, 1.0)
-    ..emissiveFactor = vm.Vector4(0.1, 0.25, 1.0, 1.0)
-    ..roughnessFactor = 0.3;
+  static final PhysicallyBasedMaterial sirenBlueMaterial =
+      PhysicallyBasedMaterial()
+        ..baseColorFactor = vm.Vector4(0.1, 0.2, 0.9, 1.0)
+        ..emissiveFactor = vm.Vector4(0.1, 0.25, 1.0, 1.0)
+        ..roughnessFactor = 0.3;
 
   /// Мигалка всех патрульных машин: красный и синий по очереди (общие
   /// материалы — одна правка на кадр, сколько бы машин ни было).
@@ -136,8 +199,11 @@ class VehicleModels {
 /// машины игрока, и для трафика, который двигают позицией без контроллера.
 /// Руль — по велосипедной модели из скорости поворота курса.
 class WheelSpinComponent extends Component {
-  WheelSpinComponent(this.wheels, {required this.wheelRadius, required this.wheelbase})
-    : _bases = [for (final wheel in wheels) wheel.position];
+  WheelSpinComponent(
+    this.wheels, {
+    required this.wheelRadius,
+    required this.wheelbase,
+  }) : _bases = [for (final wheel in wheels) wheel.position];
 
   /// Колёса в порядке [VehicleModels.wheelNames]: передние — первые два.
   final List<Node> wheels;
@@ -185,12 +251,15 @@ class WheelSpinComponent extends Component {
 
     final roll = vm.Quaternion.axisAngle(vm.Vector3(1, 0, 0), _spin);
     for (var i = 0; i < wheels.length; i++) {
-      final front = i < 2 && wheels.length == 3;
+      final front = i < 2;
       wheels[i]
         ..position = _bases[i]
-        ..rotation = front ? vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), _steer) * roll : roll;
+        ..rotation = front
+            ? vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), _steer) * roll
+            : roll;
     }
   }
 
-  static double _wrap(double angle) => (angle + math.pi) % (2 * math.pi) - math.pi;
+  static double _wrap(double angle) =>
+      (angle + math.pi) % (2 * math.pi) - math.pi;
 }

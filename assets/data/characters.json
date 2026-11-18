@@ -1,11 +1,14 @@
 {
-  "comment": "Модели персонажей (assets/models/characters, готовятся tools/assets/prepare_characters.mjs из паков Quaternius, CC0 — см. assets/models/CREDITS.md). У всех один скелет; анимации лежат только в носителях своего пола (animationCarriers), остальные модели берут клипы оттуда — клипы flutter_scene привязываются к костям по имени.",
+  "comment": "Старые модели Quaternius используют общие клипы своего пола. Новый герой male_camper использует свой 24-костный скелет и отдельный носитель клипов (modelAnimationCarriers); перенос клипов по одному только полу для него недопустим. Источники и лицензии — assets/models/CREDITS.md.",
   "animationCarriers": {
     "male": "male_casual",
     "female": "female_casual"
   },
-  "player": "male_hoodie",
-  "police": ["male_swat", "female_soldier"],
+  "player": "male_camper",
+  "police": [
+    "male_swat",
+    "female_soldier"
+  ],
   "civilians": [
     "male_casual",
     "male_business",
@@ -19,5 +22,8 @@
     "female_punk",
     "female_suit",
     "female_worker"
-  ]
+  ],
+  "modelAnimationCarriers": {
+    "male_camper": "male_camper"
+  }
 }

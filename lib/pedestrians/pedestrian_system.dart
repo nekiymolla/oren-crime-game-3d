@@ -27,6 +27,7 @@ typedef PedestrianShotHit = ({int index, double distance, BodyZone zone});
 class PedestrianSystem implements ShootTargets {
   PedestrianSystem({
     required this.nav,
+    this.groundHeightAt,
     this.characters,
     this.population = 16,
     this.spawnRadius = 120.0,
@@ -56,6 +57,7 @@ class PedestrianSystem implements ShootTargets {
 
   /// Навигационная сетка района (lib/world/nav_grid.dart).
   final NavGrid nav;
+  final double Function(double, double)? groundHeightAt;
   final int population;
   final double spawnRadius;
   final double despawnRadius;
@@ -119,16 +121,31 @@ class PedestrianSystem implements ShootTargets {
   /// Пуля по лучу: ближайший живой стоящий пешеход, в которого попадает
   /// луч из [origin] вдоль единичного [direction] не дальше [maxDistance].
   @override
-  PedestrianShotHit? raycastShootable(vm.Vector3 origin, vm.Vector3 direction, double maxDistance) {
+  PedestrianShotHit? raycastShootable(
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double maxDistance,
+  ) {
     PedestrianShotHit? best;
     for (var i = 0; i < _pedestrians.length; i++) {
       final pedestrian = _pedestrians[i];
       if (!pedestrian.isShootable) continue;
       final limit = best?.distance ?? maxDistance;
-      final t = rayVerticalCapsule(origin, direction, limit, pedestrian.position, _radius, _totalHeight);
+      final t = rayVerticalCapsule(
+        origin,
+        direction,
+        limit,
+        pedestrian.position,
+        _radius,
+        _totalHeight,
+      );
       if (t == null) continue;
       final hitY = origin.y + direction.y * t;
-      best = (index: i, distance: t, zone: zoneForHitHeight(hitY - pedestrian.position.y, _totalHeight));
+      best = (
+        index: i,
+        distance: t,
+        zone: zoneForHitHeight(hitY - pedestrian.position.y, _totalHeight),
+      );
     }
     return best;
   }
@@ -140,7 +157,10 @@ class PedestrianSystem implements ShootTargets {
     final pedestrian = _pedestrians[index];
     final killed = pedestrian.takeDamage(damage, from);
     if (_models.isEmpty) {
-      bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+      bodies.setInstanceTransform(
+        pedestrian.instanceIndex,
+        _instanceTransform(pedestrian),
+      );
     } else if (!killed) {
       _models[index].play(CharacterAnim.hit, fadeSeconds: 0.08, restart: true);
     }
@@ -154,7 +174,10 @@ class PedestrianSystem implements ShootTargets {
     final radiusSq = radius * radius;
     var witnesses = 0;
     for (final pedestrian in _pedestrians) {
-      if (pedestrian.isDead || (pedestrian.position - shooter).length2 > radiusSq) continue;
+      if (pedestrian.isDead ||
+          (pedestrian.position - shooter).length2 > radiusSq) {
+        continue;
+      }
       pedestrian.scare(shooter);
       witnesses++;
     }
@@ -185,7 +208,12 @@ class PedestrianSystem implements ShootTargets {
   /// [hitSpeedThreshold]), пешеходы в радиусе удара падают (см.
   /// Pedestrian.knockDown) и засчитываются в возвращаемое число наездов —
   /// на нём строится WantedSystem (см. lib/police).
-  int update(double dt, vm.Vector3 trackedPosition, {vm.Vector3? vehiclePosition, double vehicleSpeed = 0.0}) {
+  int update(
+    double dt,
+    vm.Vector3 trackedPosition, {
+    vm.Vector3? vehiclePosition,
+    double vehicleSpeed = 0.0,
+  }) {
     if (!_spawned) {
       _spawnInitialPopulation(trackedPosition);
       _spawned = true;
@@ -214,16 +242,24 @@ class PedestrianSystem implements ShootTargets {
           (pedestrian.position - vehiclePosition).length2 <= hitRadiusSq) {
         hits++;
         pedestrian.knockDown(vehiclePosition, vehicleSpeed);
-      } else if ((pedestrian.position - trackedPosition).length2 > despawnRadiusSq) {
+      } else if ((pedestrian.position - trackedPosition).length2 >
+          despawnRadiusSq) {
         _respawnNear(pedestrian, trackedPosition);
       } else if (pedestrian.isDead &&
           pedestrian.deadSeconds > _bodyCleanupSeconds &&
-          (pedestrian.position - trackedPosition).length2 > _bodyCleanupDistance * _bodyCleanupDistance) {
+          (pedestrian.position - trackedPosition).length2 >
+              _bodyCleanupDistance * _bodyCleanupDistance) {
         _respawnNear(pedestrian, trackedPosition);
       }
 
+      pedestrian.position.y =
+          groundHeightAt?.call(pedestrian.position.x, pedestrian.position.z) ??
+          pedestrian.position.y;
       if (_models.isEmpty) {
-        bodies.setInstanceTransform(pedestrian.instanceIndex, _instanceTransform(pedestrian));
+        bodies.setInstanceTransform(
+          pedestrian.instanceIndex,
+          _instanceTransform(pedestrian),
+        );
       } else {
         _updateModel(i, dt, trackedPosition);
       }
@@ -236,28 +272,42 @@ class PedestrianSystem implements ShootTargets {
     final pedestrian = _pedestrians[i];
     final model = _models[i];
     final last = _lastPositions[i];
-    final moved = math.sqrt(math.pow(pedestrian.position.x - last.x, 2) + math.pow(pedestrian.position.z - last.z, 2));
+    final moved = math.sqrt(
+      math.pow(pedestrian.position.x - last.x, 2) +
+          math.pow(pedestrian.position.z - last.z, 2),
+    );
     last.setFrom(pedestrian.position);
     final eye = viewPosition;
     final forward = viewForward;
     final visible =
-        (pedestrian.position - trackedPosition).length2 <= modelVisibleDistance * modelVisibleDistance &&
+        (pedestrian.position - trackedPosition).length2 <=
+            modelVisibleDistance * modelVisibleDistance &&
         (eye == null ||
             forward == null ||
-            (pedestrian.position.x - eye.x) * forward.x + (pedestrian.position.z - eye.z) * forward.z > -_behindViewMargin);
+            (pedestrian.position.x - eye.x) * forward.x +
+                    (pedestrian.position.z - eye.z) * forward.z >
+                -_behindViewMargin);
     model.visible = visible;
     if (!visible) return;
     model.node.position = pedestrian.position;
-    model.node.rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), pedestrian.yaw);
+    model.node.rotation = vm.Quaternion.axisAngle(
+      vm.Vector3(0, 1, 0),
+      pedestrian.yaw,
+    );
     final lying = pedestrian.isDead || pedestrian.isKnockedDown;
     // Удар пулей доигрывается, если раненый не упал.
-    final reacting = model.current == CharacterAnim.hit && !model.currentFinished && !lying;
+    final reacting =
+        model.current == CharacterAnim.hit && !model.currentFinished && !lying;
     if (!reacting) {
       // Сбитый машиной отлетает со скоростью — это не бег; скачок за кадр
       // дальше пары метров — переселение, а не движение.
       final speed = lying || dt <= 0 || moved > 3.0 ? 0.0 : moved / dt;
       final choice = locomotionAnim(speed: speed, lying: lying);
-      model.play(choice.anim, rate: choice.rate, fadeSeconds: lying ? 0.12 : 0.25);
+      model.play(
+        choice.anim,
+        rate: choice.rate,
+        fadeSeconds: lying ? 0.12 : 0.25,
+      );
     }
     model.update(dt);
   }
@@ -265,7 +315,10 @@ class PedestrianSystem implements ShootTargets {
   /// Стоящий — капсула вертикально по курсу; сбитый или убитый — лежит на
   /// земле вдоль направления отлёта.
   vm.Matrix4 _instanceTransform(Pedestrian pedestrian) {
-    final heading = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), pedestrian.yaw);
+    final heading = vm.Quaternion.axisAngle(
+      vm.Vector3(0, 1, 0),
+      pedestrian.yaw,
+    );
     if (!pedestrian.isKnockedDown && !pedestrian.isDead) {
       return vm.Matrix4.compose(
         pedestrian.position + vm.Vector3(0, _totalHeight / 2, 0),
@@ -282,7 +335,10 @@ class PedestrianSystem implements ShootTargets {
 
   void _spawnInitialPopulation(vm.Vector3 center) {
     for (var i = 0; i < population; i++) {
-      final pedestrian = Pedestrian(position: _randomSpotNear(center), yaw: _random.nextDouble() * 2 * math.pi);
+      final pedestrian = Pedestrian(
+        position: _randomSpotNear(center),
+        yaw: _random.nextDouble() * 2 * math.pi,
+      );
       final library = characters;
       if (library == null) {
         pedestrian.instanceIndex = bodies.addInstance(
@@ -340,12 +396,15 @@ class PedestrianSystem implements ShootTargets {
   /// нашлось — рядом с самим [center].
   vm.Vector3 _randomSpotNear(vm.Vector3 center, {double minDistance = 0.0}) {
     for (var attempt = 0; attempt < 60; attempt++) {
-      final radius = minDistance + _random.nextDouble() * (spawnRadius - minDistance);
+      final radius =
+          minDistance + _random.nextDouble() * (spawnRadius - minDistance);
       final angle = _random.nextDouble() * 2 * math.pi;
       final x = center.x + math.sin(angle) * radius;
       final z = center.z + math.cos(angle) * radius;
       final kind = nav.kindAt(x, z);
-      if (kind == NavKind.ground || kind == NavKind.sidewalk) return vm.Vector3(x, 0, z);
+      if (kind == NavKind.ground || kind == NavKind.sidewalk) {
+        return vm.Vector3(x, 0, z);
+      }
     }
     return vm.Vector3(center.x, 0, center.z);
   }

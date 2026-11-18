@@ -16,13 +16,15 @@ class VehicleInputBridgeComponent extends Component {
 
   @override
   void update(double deltaSeconds) {
-    if (gameModeState.mode != ControlMode.driving || !identical(gameModeState.activeVehicle, controller)) {
+    if (gameModeState.mode != ControlMode.driving ||
+        !identical(gameModeState.activeVehicle, controller)) {
       controller.setInput(throttle: 0, steer: 0);
       return;
     }
     controller.setInput(
       throttle: inputState.moveDirection.y,
       steer: inputState.moveDirection.x,
+      handbrake: inputState.handbrakeHeld,
     );
   }
 }

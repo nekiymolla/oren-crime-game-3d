@@ -11,6 +11,10 @@ class PlayerHealth {
 
   double armor = 0.0;
 
+  /// Changes for every accepted hit, including damage absorbed by armour.
+  int get damageRevision => _damageRevision;
+  int _damageRevision = 0;
+
   /// Через сколько секунд без урона начинается регенерация и как быстро.
   static const double regenDelaySeconds = 8.0;
   static const double regenPerSecond = 4.0;
@@ -27,6 +31,7 @@ class PlayerHealth {
   /// Возвращает true ровно когда этот урон убил.
   bool takeDamage(double amount) {
     if (isDead || amount <= 0.0) return false;
+    _damageRevision++;
     final absorbed = math.min(armor, amount);
     armor -= absorbed;
     health = math.max(0.0, health - (amount - absorbed));

@@ -5,17 +5,12 @@ import 'package:crime_oren/world/neon_signs.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('у каждого варианта трубки в пределах вывески', () {
-    for (var variant = 0; variant < 3; variant++) {
-      final tubes = neonTubes(3.0, variant);
-      expect(tubes, isNotEmpty);
-      for (final t in tubes) {
-        final halfAlong = t.vertical ? 0.0 : t.length / 2;
-        expect(t.x.abs() + halfAlong, lessThanOrEqualTo(1.5 + 1e-9), reason: 'вариант $variant');
-        final halfUp = t.vertical ? t.length / 2 : 0.0;
-        expect(t.y.abs() + halfUp, lessThanOrEqualTo(0.45 + 1e-9), reason: 'вариант $variant');
-      }
+  test('соседние вывески с разными надписями, панель в пропорции текстуры', () {
+    for (var i = 0; i < 40; i++) {
+      expect(neonSignText(i), isNotEmpty);
+      expect(neonSignText(i), isNot(neonSignText(i + 1)));
     }
+    expect(neonPanelHeight(4.4), closeTo(1.1, 1e-9));
   });
 
   test('вывески из пайплайна читаются и не толпятся', () {

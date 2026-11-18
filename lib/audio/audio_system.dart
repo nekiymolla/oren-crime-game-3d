@@ -1,3 +1,4 @@
+import 'dart:async' show unawaited;
 import 'dart:math' as math;
 
 import 'package:flutter_scene/audio.dart';
@@ -24,6 +25,8 @@ class AudioSystem {
   late final SoloudAudioEngine _engine;
   final Map<String, AudioClip> _clips = {};
   bool _ready = false;
+  bool _muted = true;
+  Future<void>? _loading;
 
   AudioBus? _sfx;
   AudioBus? _ambience;
@@ -65,15 +68,28 @@ class AudioSystem {
   ];
 
   /// Затухание выстрелов: слышно далеко (на 40 м — ~15% громкости).
-  final AudioAttenuation _loud = AudioAttenuation(minDistance: 2.0, maxDistance: 150.0, rolloffFactor: 0.3);
+  final AudioAttenuation _loud = AudioAttenuation(
+    minDistance: 2.0,
+    maxDistance: 150.0,
+    rolloffFactor: 0.3,
+  );
 
   /// Обычные звуки мира: шаги, рикошеты.
-  final AudioAttenuation _near = AudioAttenuation(minDistance: 1.0, maxDistance: 40.0, rolloffFactor: 1.0);
+  final AudioAttenuation _near = AudioAttenuation(
+    minDistance: 1.0,
+    maxDistance: 40.0,
+    rolloffFactor: 1.0,
+  );
 
   /// Подключить движок к сцене и загрузить клипы. Не бросает исключений.
-  Future<void> load() async {
+  Future<void> load() {
+    if (_ready || _muted) return Future<void>.value();
+    return _loading ??= _loadEngine();
+  }
+
+  Future<void> _loadEngine() async {
     try {
-      _engine = SoloudAudioEngine(maxActiveVoices: 32);
+      _engine = SoloudAudioEngine(maxActiveVoices: 32)..masterVolume = 0.0;
       scene.root.addComponent(_engine);
       for (final name in _clipNames) {
         _clips[name] = await _engine.loadClip('assets/sounds/$name.wav');
@@ -83,13 +99,24 @@ class AudioSystem {
       _ui = _engine.createBus('ui');
       _ready = true;
     } on Object catch (error) {
+      _muted = true;
       // ignore: avoid_print
       print('Звук не поднялся, играем без него: $error');
       return;
     }
 
-    _engineLoop = _loop('engine_loop', bus: _sfx, positional: true, attenuation: _near);
-    _screechLoop = _loop('tire_screech_loop', bus: _sfx, positional: true, attenuation: _near);
+    _engineLoop = _loop(
+      'engine_loop',
+      bus: _sfx,
+      positional: true,
+      attenuation: _near,
+    );
+    _screechLoop = _loop(
+      'tire_screech_loop',
+      bus: _sfx,
+      positional: true,
+      attenuation: _near,
+    );
     _vehicleEmitter
       ..addComponent(_engineLoop!)
       ..addComponent(_screechLoop!);
@@ -107,22 +134,32 @@ class AudioSystem {
     for (final loop in [_rainLoop!, _windLoop!, _cityLoop!]) {
       loop.play();
     }
+    _engine.masterVolume = _muted ? 0.0 : 1.0;
   }
 
-  ClipAudioSource _loop(String name, {AudioBus? bus, bool positional = false, AudioAttenuation? attenuation}) =>
-      ClipAudioSource(
-        clip: _clips[name],
-        looping: true,
-        volume: 0.0,
-        positional: positional,
-        attenuation: attenuation,
-        bus: bus,
-      );
+  ClipAudioSource _loop(
+    String name, {
+    AudioBus? bus,
+    bool positional = false,
+    AudioAttenuation? attenuation,
+  }) => ClipAudioSource(
+    clip: _clips[name],
+    looping: true,
+    volume: 0.0,
+    positional: positional,
+    attenuation: attenuation,
+    bus: bus,
+  );
 
   /// Вкл/выкл весь звук (debug-панель).
-  bool get muted => _ready && _engine.masterVolume == 0.0;
+  bool get muted => _muted;
   set muted(bool value) {
-    if (_ready) _engine.masterVolume = value ? 0.0 : 1.0;
+    _muted = value;
+    if (_ready) {
+      _engine.masterVolume = value ? 0.0 : 1.0;
+    } else if (!value) {
+      unawaited(load());
+    }
   }
 
   void _oneShot(
@@ -133,7 +170,7 @@ class AudioSystem {
     AudioBus? bus,
     AudioAttenuation? attenuation,
   }) {
-    if (!_ready) return;
+    if (!_ready || _muted) return;
     final clip = _clips[name];
     if (clip == null) return;
     _engine.playOneShot(
@@ -152,15 +189,25 @@ class AudioSystem {
 
   // --- События ------------------------------------------------------------
 
-  void gunshot(vm.Vector3 at, {bool police = false}) =>
-      _oneShot('gunshot', at: at, pitch: (police ? 0.9 : 1.0) * _vary(0.05), attenuation: _loud);
+  void gunshot(vm.Vector3 at, {bool police = false}) => _oneShot(
+    'gunshot',
+    at: at,
+    pitch: (police ? 0.9 : 1.0) * _vary(0.05),
+    attenuation: _loud,
+  );
 
-  void bulletImpact(vm.Vector3 at) => _oneShot('bullet_impact', at: at, volume: 0.7, pitch: _vary(0.15));
+  void bulletImpact(vm.Vector3 at) =>
+      _oneShot('bullet_impact', at: at, volume: 0.7, pitch: _vary(0.15));
 
   void reload(vm.Vector3 at) => _oneShot('reload', at: at, volume: 0.8);
 
-  void crash(vm.Vector3 at, double impactSpeed) =>
-      _oneShot('crash', at: at, volume: (impactSpeed / 15.0).clamp(0.3, 1.0), pitch: _vary(0.08), attenuation: _loud);
+  void crash(vm.Vector3 at, double impactSpeed) => _oneShot(
+    'crash',
+    at: at,
+    volume: (impactSpeed / 15.0).clamp(0.3, 1.0),
+    pitch: _vary(0.08),
+    attenuation: _loud,
+  );
 
   void pickup() => _oneShot('pickup', bus: _ui, volume: 0.7);
 
@@ -182,7 +229,8 @@ class AudioSystem {
     required vm.Vector3 playerFeet,
     required double playerSpeed,
     required bool playerGrounded,
-    ({vm.Vector3 position, double speed, double maxSpeed, double driftFactor})? vehicle,
+    ({vm.Vector3 position, double speed, double maxSpeed, double driftFactor})?
+    vehicle,
     required double rain,
     required double snow,
     required double wind,
@@ -190,10 +238,11 @@ class AudioSystem {
     required double lightningFlash,
     required Iterable<Node> policeCars,
   }) {
-    if (!_ready) return;
+    if (!_ready || _muted) return;
 
     // Шаги — только пешком.
-    if (vehicle == null && _footsteps.update(dt, speed: playerSpeed, grounded: playerGrounded)) {
+    if (vehicle == null &&
+        _footsteps.update(dt, speed: playerSpeed, grounded: playerGrounded)) {
       _oneShot('footstep', at: playerFeet, volume: 0.45, pitch: _vary(0.12));
     }
 
@@ -207,14 +256,23 @@ class AudioSystem {
       engine
         ..pitch = enginePitch(vehicle.speed, vehicle.maxSpeed)
         ..volume = engineVolume(vehicle.speed, vehicle.maxSpeed);
-      screech.volume = screechVolume(driftFactor: vehicle.driftFactor, speed: vehicle.speed);
+      screech.volume = screechVolume(
+        driftFactor: vehicle.driftFactor,
+        speed: vehicle.speed,
+      );
     } else {
       if (engine.isPlaying) engine.stop();
       if (screech.isPlaying) screech.stop();
     }
 
     // Погода и город.
-    final mix = ambienceMix(rain: rain, snow: snow, wind: wind, nightFactor: nightFactor, inVehicle: vehicle != null);
+    final mix = ambienceMix(
+      rain: rain,
+      snow: snow,
+      wind: wind,
+      nightFactor: nightFactor,
+      inVehicle: vehicle != null,
+    );
     _rainLoop!.volume = mix.rain;
     _windLoop!.volume = mix.wind;
     _cityLoop!.volume = mix.city;
@@ -239,11 +297,17 @@ class AudioSystem {
         volume: 0.55,
         pitch: _vary(0.04),
         bus: _sfx,
-        attenuation: AudioAttenuation(minDistance: 6.0, maxDistance: 250.0, rolloffFactor: 0.5),
+        attenuation: AudioAttenuation(
+          minDistance: 6.0,
+          maxDistance: 250.0,
+          rolloffFactor: 0.5,
+        ),
       );
-      car.add(Node()
-        ..position = vm.Vector3(0, 1.6, 0)
-        ..addComponent(siren));
+      car.add(
+        Node()
+          ..position = vm.Vector3(0, 1.6, 0)
+          ..addComponent(siren),
+      );
       siren.play();
       _sirens[car] = siren;
     }

@@ -63,7 +63,13 @@ CharacterRaycaster boxAt(double minX, double maxX, double minZ, double maxZ) {
 }
 
 /// Расстояние в плане от точки до коробки (0 — внутри).
-double distanceToBox(vm.Vector3 p, double minX, double maxX, double minZ, double maxZ) {
+double distanceToBox(
+  vm.Vector3 p,
+  double minX,
+  double maxX,
+  double minZ,
+  double maxZ,
+) {
   final dx = math.max(0.0, math.max(minX - p.x, p.x - maxX));
   final dz = math.max(0.0, math.max(minZ - p.z, p.z - maxZ));
   return math.sqrt(dx * dx + dz * dz);
@@ -83,15 +89,32 @@ void main() {
     run(motion, 2.0);
     expect(motion.isGrounded, isTrue);
     expect(motion.position.y, closeTo(0.0, 1e-6));
-    expect(motion.horizontalSpeed, closeTo(4.5, 0.05));
-    expect(motion.position.z, greaterThan(8.0));
+    expect(motion.horizontalSpeed, closeTo(motion.walkSpeed, 0.05));
+    expect(motion.position.z, greaterThan(2.8));
+  });
+
+  test('аналоговый стик сохраняет величину отклонения', () {
+    final slow = CharacterMotion()..setMoveInput(vm.Vector2(0, 0.25));
+    final full = CharacterMotion()..setMoveInput(vm.Vector2(0, 1));
+    run(slow, 2);
+    run(full, 2);
+    expect(slow.horizontalSpeed / full.horizontalSpeed, closeTo(0.25, 0.01));
+  });
+
+  test('диагональный ввод не превышает максимальную скорость', () {
+    final motion = CharacterMotion()..setMoveInput(vm.Vector2(1, 1));
+    run(motion, 2);
+    expect(motion.horizontalSpeed, closeTo(motion.walkSpeed, 0.01));
   });
 
   test('бег быстрее шага в runMultiplier раз', () {
     final motion = CharacterMotion()
       ..setMoveInput(vm.Vector2(0, 1), isRunning: true);
     run(motion, 2.0);
-    expect(motion.horizontalSpeed, closeTo(4.5 * 1.8, 0.1));
+    expect(
+      motion.horizontalSpeed,
+      closeTo(motion.walkSpeed * motion.runMultiplier, 0.1),
+    );
   });
 
   test('упирается в стену и не проходит сквозь неё даже бегом', () {
@@ -109,7 +132,7 @@ void main() {
     run(motion, 3.0);
     expect(motion.position.x, lessThan(2.0 - 0.45));
     // Вдоль стены движение продолжается, а не залипает.
-    expect(motion.position.z, greaterThan(5.0));
+    expect(motion.position.z, greaterThan(3.0));
   });
 
   test('в угол дома не заходит ни под каким углом подхода', () {
@@ -121,10 +144,12 @@ void main() {
       final start = vm.Vector3(-3 * math.cos(a), 0, -3 * math.sin(a));
       // Старт внутри дома или вплотную к нему — не подход снаружи.
       if (distanceToBox(start, 0, 10, 0, 10) < 1.0) continue;
-      final motion = CharacterMotion(
-        raycast: boxAt(0, 10, 0, 10),
-        position: start,
-      )..setMoveInput(vm.Vector2(-start.x, -start.z).normalized(), isRunning: true);
+      final motion =
+          CharacterMotion(raycast: boxAt(0, 10, 0, 10), position: start)
+            ..setMoveInput(
+              vm.Vector2(-start.x, -start.z).normalized(),
+              isRunning: true,
+            );
       for (var i = 0; i < 180; i++) {
         motion.step(1 / 60);
         // Капсула-плейсхолдер радиусом 0.4 не должна пересекать дом.
@@ -145,14 +170,14 @@ void main() {
       position: vm.Vector3(-1, 0, 2),
     )..setMoveInput(vm.Vector2(0.15, -1).normalized());
     run(motion, 3.0);
-    expect(motion.position.z, lessThan(-5.0));
+    expect(motion.position.z, lessThan(-2.0));
   });
 
   test('камера развёрнута — "вперёд" на джойстике идёт от камеры', () {
     final motion = CharacterMotion()
       ..setMoveInput(vm.Vector2(0, 1), cameraHeadingYaw: math.pi / 2);
     run(motion, 1.0);
-    expect(motion.position.x.abs(), greaterThan(2.0));
+    expect(motion.position.x.abs(), greaterThan(1.3));
     expect(motion.position.z.abs(), lessThan(0.1));
   });
 
@@ -173,9 +198,8 @@ void main() {
 
   test('застрявшего в стене выталкивает наружу, а не внутрь', () {
     // Тело уже почти в стене: до неё 0.1 м при радиусе 0.5.
-    final motion = CharacterMotion(
-      raycast: wallAt(0.1),
-    )..setMoveInput(vm.Vector2(1, 0));
+    final motion = CharacterMotion(raycast: wallAt(0.1))
+      ..setMoveInput(vm.Vector2(1, 0));
     run(motion, 1.0);
     expect(motion.position.x, lessThan(0.0));
   });
@@ -202,6 +226,6 @@ void main() {
     }
     final p = node.globalTransform.getTranslation();
     expect(p.x, closeTo(-20, 0.01));
-    expect(p.z, greaterThan(9.0));
+    expect(p.z, greaterThan(8.3));
   });
 }

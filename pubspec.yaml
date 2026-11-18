@@ -38,7 +38,9 @@ dependencies:
   vector_math: ^2.4.2
   path_provider: ^2.1.6
   flutter_scene_soloud: ^0.1.2
+  hooks: ^2.2.0
 dev_dependencies:
+  vm_service: ^15.3.0
   flutter_test:
     sdk: flutter
 

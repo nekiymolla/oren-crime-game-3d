@@ -8,9 +8,15 @@ import 'game.dart';
 /// отслеживание готовности) — на вызывающей стороне (см. GameHud), чтобы тот
 /// же экземпляр Game был доступен для подключения CameraControls.
 class GameView extends StatelessWidget {
-  const GameView({super.key, required this.game, this.debugOverlay});
+  const GameView({
+    super.key,
+    required this.game,
+    this.debugOverlay,
+    this.paused = false,
+  });
 
   final Game game;
+  final bool paused;
 
   /// Опционален — если задан, каждый тик пишет туда координаты
   /// отслеживаемого узла (см. Game.trackedNode), чтобы можно было сообщить
@@ -24,7 +30,11 @@ class GameView extends StatelessWidget {
     return SceneView(
       game.scene,
       onTick: (elapsed, dt) {
-        game.tick(dt);
+        final step = paused ? 0.0 : dt.clamp(0.0, 0.05);
+        if (!paused) game.tick(step);
+        // Explicit time step prevents wall-clock catch-up after a paused or
+        // backgrounded window. Render skips its own implicit component tick.
+        game.scene.update(step);
         final pos = game.trackedNode.globalTransform.getTranslation();
         debugOverlay?.setLine(
           'pos',

@@ -2,17 +2,23 @@
   "vehicles": [
     {
       "id": "car_sedan_01",
-      "displayName": "Волга-седан",
+      "displayName": "Седан 80-х",
       "modelClass": "sedan",
-      "modelAsset": "assets/models/vehicles/car_sedan_01.glb",
+      "modelAsset": "assets/models/vehicles/sedan_80.glb",
       "mass": 1450.0,
       "maxSpeedKmh": 200.0,
-      "acceleration": 16.0,
-      "braking": 32.0,
+      "acceleration": 5.2,
+      "braking": 9.6,
       "engine": {
         "maxTorqueNm": 220.0,
         "maxRpm": 6500.0,
-        "gearRatios": [3.5, 2.1, 1.4, 1.0, 0.8]
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
       },
       "suspension": {
         "stiffness": 35000.0,
@@ -38,12 +44,18 @@
       "modelAsset": "assets/models/vehicles/car_police_01.glb",
       "mass": 1500.0,
       "maxSpeedKmh": 190.0,
-      "acceleration": 15.0,
-      "braking": 30.0,
+      "acceleration": 5.8,
+      "braking": 10.0,
       "engine": {
         "maxTorqueNm": 210.0,
         "maxRpm": 6500.0,
-        "gearRatios": [3.5, 2.1, 1.4, 1.0, 0.8]
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
       },
       "suspension": {
         "stiffness": 35000.0,

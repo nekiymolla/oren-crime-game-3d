@@ -41,7 +41,8 @@ class CharacterModel {
   set visible(bool value) => node.visible = value;
 
   /// Длительность клипа [anim] в секундах (0 — клипа нет в модели).
-  double durationOf(CharacterAnim anim) => _animations[anim.clipName]?.endTime ?? 0.0;
+  double durationOf(CharacterAnim anim) =>
+      _animations[anim.clipName]?.endTime ?? 0.0;
 
   /// Неповторяющийся текущий клип (удар, выстрел) доигран до конца.
   bool get currentFinished {
@@ -52,11 +53,24 @@ class CharacterModel {
   /// Перейти на [anim] за [fadeSeconds] со скоростью [rate]. Повторный вызов
   /// с тем же клипом только меняет скорость (его зовут каждый кадр);
   /// [restart] — проиграть заново с начала (повторный выстрел).
-  void play(CharacterAnim anim, {double rate = 1.0, double fadeSeconds = 0.2, bool restart = false}) {
+  void play(
+    CharacterAnim anim, {
+    double rate = 1.0,
+    double fadeSeconds = 0.2,
+    bool restart = false,
+  }) {
     if (anim == _current && !restart) {
       _clips[anim]?.playbackTimeScale = rate;
       return;
     }
+    final previous = _current;
+    final oldClip = _clips[previous];
+    final phase = gaitTransitionPhase(
+      previous,
+      anim,
+      oldClip?.playbackTime ?? 0,
+      previous == null ? 0 : durationOf(previous),
+    );
     final firstClip = _clips.isEmpty;
     _current = anim;
     _fadeSeconds = fadeSeconds;
@@ -71,6 +85,7 @@ class CharacterModel {
       // Разные персонажи с одним клипом не должны шагать в ногу.
       if (anim.loops && !restart) clip.seek(_phase * animation.endTime);
     }
+    if (phase != null && !restart) clip.seek(phase * durationOf(anim));
     if (restart || !anim.loops) clip.seek(0);
     clip
       ..playbackTimeScale = rate

@@ -16,12 +16,13 @@ import 'character_motion.dart';
 /// PROGRESS.md).
 class CharacterControllerComponent extends Component {
   CharacterControllerComponent({
-    double walkSpeed = 4.5,
-    double runMultiplier = 1.8,
+    double walkSpeed = 1.65,
+    double runMultiplier = 3.3,
     double turnSpeed = 12.0,
     double jumpVelocity = 6.0,
     double gravity = 18.0,
     double? groundPlaneHeight = 0.0,
+    double Function(double, double)? groundHeightAt,
     double bodyRadius = 0.5,
     double chestHeight = 0.9,
     double yaw = 0.0,
@@ -33,6 +34,7 @@ class CharacterControllerComponent extends Component {
          jumpVelocity: jumpVelocity,
          gravity: gravity,
          groundPlaneHeight: groundPlaneHeight,
+         groundHeightAt: groundHeightAt,
          bodyRadius: bodyRadius,
          chestHeight: chestHeight,
          yaw: yaw,

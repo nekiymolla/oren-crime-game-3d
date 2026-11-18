@@ -64,6 +64,7 @@ class _DrivingControlsState extends State<DrivingControls> {
   void dispose() {
     // На случай выхода из машины с зажатой кнопкой — не оставляем висящий ввод.
     inputState.setMove(0, 0);
+    inputState.handbrakeHeld = false;
     super.dispose();
   }
 
@@ -73,27 +74,44 @@ class _DrivingControlsState extends State<DrivingControls> {
       children: [
         // Руль — левый нижний угол, пара кнопок влево/вправо.
         Positioned(
-          left: 24,
+          left: MediaQuery.of(context).padding.left + 24,
           bottom: widget.bottomPadding,
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _button(icon: Icons.arrow_left, setHeld: (v) => _steeringLeft = v),
+              _button(
+                icon: Icons.arrow_left,
+                setHeld: (v) => _steeringLeft = v,
+              ),
               const SizedBox(width: 12),
-              _button(icon: Icons.arrow_right, setHeld: (v) => _steeringRight = v),
+              _button(
+                icon: Icons.arrow_right,
+                setHeld: (v) => _steeringRight = v,
+              ),
             ],
           ),
         ),
         // Газ/тормоз — правый нижний угол, друг над другом.
         Positioned(
-          right: 24,
+          right: MediaQuery.of(context).padding.right + 24,
           bottom: widget.bottomPadding,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _button(icon: Icons.arrow_upward, setHeld: (v) => _accelerating = v),
+              _button(
+                icon: Icons.arrow_upward,
+                setHeld: (v) => _accelerating = v,
+              ),
               const SizedBox(height: 12),
               _button(icon: Icons.arrow_downward, setHeld: (v) => _braking = v),
+              const SizedBox(height: 12),
+              Semantics(
+                label: 'Ручник',
+                child: _button(
+                  icon: Icons.pan_tool,
+                  setHeld: (v) => inputState.handbrakeHeld = v,
+                ),
+              ),
             ],
           ),
         ),

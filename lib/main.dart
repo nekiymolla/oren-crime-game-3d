@@ -3,17 +3,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'engine/debug/fps_overlay.dart';
+import 'core/platform.dart';
 import 'ui/hud/game_hud.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   // Вождению и стрельбе в открытом мире нужны обе ориентации — HUD
   // подстраивается под ориентацию, а не фиксируется на одной (см. GameHud).
-  SystemChrome.setPreferredOrientations([
-    DeviceOrientation.portraitUp,
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
+  if (!desktopControls) {
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
   runApp(const CrimeOrenApp());
 }
 

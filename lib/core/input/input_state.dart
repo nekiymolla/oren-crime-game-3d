@@ -8,13 +8,35 @@ class InputState {
   vm.Vector2 moveDirection = vm.Vector2.zero();
 
   bool isRunning = false;
+  bool handbrakeHeld = false;
 
   /// Взводится нажатием прыжка, считывается и сбрасывается контроллером
   /// игрока за один кадр (edge-triggered, а не удержание).
   bool jumpRequested = false;
 
   /// Кнопка огня зажата — оружие стреляет с темпом из weapons.json.
-  bool fireHeld = false;
+  bool _touchFireHeld = false;
+  bool keyboardFireHeld = false;
+  bool mouseFireHeld = false;
+  bool aimHeld = false;
+  bool get fireHeld => _touchFireHeld || keyboardFireHeld || mouseFireHeld;
+  set fireHeld(bool value) {
+    _touchFireHeld = value;
+    if (!value) {
+      keyboardFireHeld = false;
+      mouseFireHeld = false;
+    }
+  }
+
+  void reset() {
+    setMove(0, 0);
+    isRunning = false;
+    handbrakeHeld = false;
+    fireHeld = false;
+    aimHeld = false;
+    jumpRequested = false;
+    reloadRequested = false;
+  }
 
   /// Перезарядка — как прыжок, одно нажатие (см. [consumeReload]).
   bool reloadRequested = false;

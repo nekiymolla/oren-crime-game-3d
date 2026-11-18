@@ -40,14 +40,44 @@ const double _runAbove = 2.6;
   required double speed,
   bool lying = false,
   bool aiming = false,
+  CharacterAnim? previous,
 }) {
   if (lying) return (anim: CharacterAnim.death, rate: 1.0);
   if (aiming) {
     return speed > _runAbove
-        ? (anim: CharacterAnim.runShoot, rate: (speed / runClipSpeed).clamp(0.6, 1.6))
+        ? (
+            anim: CharacterAnim.runShoot,
+            rate: (speed / runClipSpeed).clamp(0.6, 1.6),
+          )
         : (anim: CharacterAnim.aim, rate: 1.0);
   }
-  if (speed < _idleBelow) return (anim: CharacterAnim.idle, rate: 1.0);
-  if (speed > _runAbove) return (anim: CharacterAnim.run, rate: (speed / runClipSpeed).clamp(0.6, 1.6));
-  return (anim: CharacterAnim.walk, rate: (speed / walkClipSpeed).clamp(0.5, 1.8));
+  final idleThreshold = previous == CharacterAnim.walk ? 0.15 : _idleBelow;
+  final runThreshold = previous == CharacterAnim.run ? 2.35 : _runAbove;
+  if (speed < idleThreshold) return (anim: CharacterAnim.idle, rate: 1.0);
+  if (speed > runThreshold) {
+    return (
+      anim: CharacterAnim.run,
+      rate: (speed / runClipSpeed).clamp(0.6, 1.6),
+    );
+  }
+  return (
+    anim: CharacterAnim.walk,
+    rate: (speed / walkClipSpeed).clamp(0.2, 1.8),
+  );
+}
+
+/// Keep the supporting leg at the same cycle phase when changing gait.
+/// Independent random starts made walk/run blends visibly swap the feet.
+double? gaitTransitionPhase(
+  CharacterAnim? from,
+  CharacterAnim to,
+  double time,
+  double duration,
+) {
+  bool gait(CharacterAnim? value) =>
+      value == CharacterAnim.walk ||
+      value == CharacterAnim.run ||
+      value == CharacterAnim.runShoot;
+  if (!gait(from) || !gait(to) || duration <= 0) return null;
+  return (time / duration) % 1.0;
 }

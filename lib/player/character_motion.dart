@@ -51,8 +51,8 @@ typedef CharacterRaycaster =
 /// всё равно идут каждый кадр, пока персонаж движется.
 class CharacterMotion {
   CharacterMotion({
-    this.walkSpeed = 4.5,
-    this.runMultiplier = 1.8,
+    this.walkSpeed = 1.65,
+    this.runMultiplier = 3.3,
     this.turnSpeed = 12.0,
     this.jumpVelocity = 6.0,
     this.gravity = 18.0,
@@ -61,6 +61,7 @@ class CharacterMotion {
     this.jumpBufferWindow = 0.15,
     this.landingJumpDelay = 0.20,
     this.groundPlaneHeight = 0.0,
+    this.groundHeightAt,
     this.bodyRadius = 0.5,
     this.chestHeight = 0.9,
     this.groundProbeHeight = 0.4,
@@ -100,6 +101,7 @@ class CharacterMotion {
   /// ниже нуля и в коллизионную область сознательно не входит — два
   /// треугольника на весь район незачем перебирать рейкастом).
   double? groundPlaneHeight;
+  double Function(double x, double z)? groundHeightAt;
 
   /// Радиус тела для обхода препятствий (0 — обход выключен, только замер:
   /// без него игрок проходит сквозь стены) и высота, с которой щупаются
@@ -154,9 +156,8 @@ class CharacterMotion {
   double? facingYawOverride;
 
   /// Горизонтальная скорость, м/с — для HUD/анимаций.
-  double get horizontalSpeed => math.sqrt(
-    velocity.x * velocity.x + velocity.z * velocity.z,
-  );
+  double get horizontalSpeed =>
+      math.sqrt(velocity.x * velocity.x + velocity.z * velocity.z);
 
   /// Ввод движения: [input] в диапазоне -1..1 по каждой оси (+Y — "вперёд"),
   /// [cameraHeadingYaw] — курс камеры, чтобы "вперёд" было "от камеры", а не
@@ -261,17 +262,33 @@ class CharacterMotion {
       vm.Vector3(0, -1, 0),
       groundProbeDistance,
     );
-    if (hit != null && hit.distance <= groundSnapDistance) {
+    final terrainY =
+        groundHeightAt?.call(position.x, position.z) ?? groundPlaneHeight;
+    if (hit != null &&
+        hit.distance <= groundSnapDistance &&
+        (terrainY == null || rayStart.y - hit.distance >= terrainY - 0.05)) {
       detected = true;
       groundY = rayStart.y - hit.distance;
       normal = hit.normal;
-    } else if (groundPlaneHeight != null &&
-        position.y <= groundPlaneHeight! + 0.05) {
+    } else if (terrainY != null && position.y <= terrainY + 0.05) {
       detected = true;
-      groundY = groundPlaneHeight!;
+      groundY = terrainY;
+      final height = groundHeightAt;
+      if (height != null) {
+        const e = 0.1;
+        normal = vm.Vector3(
+          height(position.x - e, position.z) -
+              height(position.x + e, position.z),
+          2 * e,
+          height(position.x, position.z - e) -
+              height(position.x, position.z + e),
+        ).normalized();
+      }
     }
 
-    if (detected && velocity.y <= 0.0 && (isGrounded || position.y <= groundY + 0.25)) {
+    if (detected &&
+        velocity.y <= 0.0 &&
+        (isGrounded || position.y <= groundY + 0.25)) {
       if (!isGrounded) {
         velocity.y = 0.0;
         if (_airborneTime > 0.08) _landingTimer = landingJumpDelay;
@@ -302,7 +319,12 @@ class CharacterMotion {
         inputZ = rotatedZ;
       }
       final targetSpeed = walkSpeed * (_isRunning ? runMultiplier : 1.0);
-      final desired = vm.Vector2(inputX, inputZ).normalized() * targetSpeed;
+      // Preserve the stick's magnitude: a small deflection means a slow
+      // step, while diagonal keyboard input must never exceed full speed.
+      final desired =
+          vm.Vector2(inputX, inputZ).normalized() *
+          targetSpeed *
+          inputLength.clamp(0.0, 1.0);
 
       final accelRate = isGrounded ? 15.0 : 4.0;
       final t = 1.0 - math.exp(-accelRate * dt);
@@ -315,7 +337,8 @@ class CharacterMotion {
       // При прицеливании корпус держит прицел (см. facingYawOverride).
       if (facingYawOverride == null) {
         final targetYaw = math.atan2(desired.x, desired.y);
-        final angleDiff = (targetYaw - _yaw + math.pi) % (2 * math.pi) - math.pi;
+        final angleDiff =
+            (targetYaw - _yaw + math.pi) % (2 * math.pi) - math.pi;
         _yaw += angleDiff * (1.0 - math.exp(-turnSpeed * dt));
       }
     } else {
@@ -374,11 +397,7 @@ class CharacterMotion {
     }
 
     final moveLength = move.length;
-    final origin = vm.Vector3(
-      position.x,
-      position.y + chestHeight,
-      position.z,
-    );
+    final origin = vm.Vector3(position.x, position.y + chestHeight, position.z);
     // Луч, пришедший в стену под углом, проходит до неё длиннее
     // перпендикуляра (d / cos угла): ближайший к нормали луч кольца бывает
     // до 22.5° от неё, а у угла дома он может пройти мимо грани, и стену

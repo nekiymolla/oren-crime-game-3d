@@ -36,6 +36,7 @@ function collectMeshNodes(node, out) {
   for (const child of node.listChildren()) collectMeshNodes(child, out);
 }
 const meshNodes = [];
+const anchorNodes = new Set();
 for (const child of scene.listChildren()) collectMeshNodes(child, meshNodes);
 
 // Находим для каждой высоты-маркера её узел и центроид XZ.
@@ -58,6 +59,7 @@ for (const node of meshNodes) {
         minZ = Math.min(minZ, arr[i + 2]);
         maxZ = Math.max(maxZ, arr[i + 2]);
       }
+      anchorNodes.add(node);
       found[name] = { node, x: (minX + maxX) / 2, z: (minZ + maxZ) / 2 };
     }
   }
@@ -112,13 +114,13 @@ fs.writeFileSync(
 console.log(`Калибровка записана: ${calibrationPath}`);
 
 // Убираем сами маячки — они не часть реального мира.
-for (const { node } of Object.values(found)) {
+for (const node of anchorNodes) {
   node.getParentNode()?.removeChild(node);
   node.dispose();
 }
 
 // Сдвигаем все оставшиеся позиции (X/Z; Y — высота — не трогаем).
-const anchorNodes = new Set(Object.values(found).map((a) => a.node));
+// Every wall/roof primitive belonging to a calibration marker was removed.
 const seen = new Set();
 for (const node of meshNodes) {
   if (anchorNodes.has(node)) continue;

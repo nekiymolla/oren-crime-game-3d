@@ -58,8 +58,12 @@ rm "$RAW_FILE"
 # иначе рендер и raycast-коллизии считаются по всей геометрии сразу.
 rm -rf "$CHUNKS_DIR"
 node "$SCRIPT_DIR/grid_split.mjs" "$RECENTERED_FILE" "$CHUNKS_DIR" "$CELL_SIZE_METERS"
+node "$SCRIPT_DIR/../assets/sanitize_world.mjs" "$CHUNKS_DIR"
 # Окна домов светятся ночью, дороги мокнут в дождь — помечаем их материалы (см. скрипт).
 node "$SCRIPT_DIR/mark_night_materials.mjs" "$CHUNKS_DIR"
+# Объёмные детали домов из тех же контуров; исходные чанки не меняются.
+node "$SCRIPT_DIR/../assets/prepare_building_details.mjs" "$CHUNKS_DIR" \
+  "$SCRIPT_DIR/../../assets/models/world/details"
 # Карта района для радара/компаса HUD — вид сверху по той же геометрии.
 node "$SCRIPT_DIR/render_minimap.mjs" "$CHUNKS_DIR" \
   "$SCRIPT_DIR/../../assets/data/minimap.png" "$SCRIPT_DIR/../../assets/data/minimap.json"

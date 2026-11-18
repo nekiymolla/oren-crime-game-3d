@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import 'camera_obstruction.dart';
+
 /// Камера от третьего лица, как встроенный [FollowCameraController], плюс
 /// режим прицеливания: при [aiming] камера плавно подходит ближе и уходит
 /// за правое плечо. Иначе прицел в центре экрана закрывал бы сам
@@ -11,7 +13,17 @@ import 'package:vector_math/vector_math.dart' as vm;
 /// Орбита (yaw/pitch/distance, orbitBy, жесты) — от базового класса;
 /// переопределён только расчёт позиции в [update].
 class GameCameraController extends FollowCameraController {
-  GameCameraController({super.followTarget, super.distance, super.lookHeight, super.minPitch});
+  GameCameraController({
+    super.followTarget,
+    super.distance,
+    super.lookHeight,
+    super.minPitch,
+    super.pitch = 0.20,
+    super.yaw,
+    this.obstructionRaycast,
+  });
+
+  final CameraObstructionRaycast? obstructionRaycast;
 
   /// Целимся (стрельба) — камера за плечом.
   bool aiming = false;
@@ -45,8 +57,12 @@ class GameCameraController extends FollowCameraController {
     final aimGoal = aiming ? 1.0 : 0.0;
     _aimBlend += (aimGoal - _aimBlend) * (1.0 - math.exp(-_aimBlendSpeed * dt));
 
-    final base = followTarget?.globalTransform.getTranslation() ?? vm.Vector3.zero();
-    final lookAt = base + vm.Vector3(0.0, lookHeight, 0.0) + right * (shoulderOffset * _aimBlend);
+    final base =
+        followTarget?.globalTransform.getTranslation() ?? vm.Vector3.zero();
+    final lookAt =
+        base +
+        vm.Vector3(0.0, lookHeight, 0.0) +
+        right * (shoulderOffset * _aimBlend);
     final aimedDistance = math.min(distance, aimDistance);
     final effectiveDistance = distance + (aimedDistance - distance) * _aimBlend;
     final horizontal = math.cos(pitch) * effectiveDistance;
@@ -64,6 +80,21 @@ class GameCameraController extends FollowCameraController {
       _position.addScaled(desired - _position, r);
       _target.addScaled(lookAt - _target, r);
     }
-    node.lookAtFrom(_position, _target);
+    // Check AFTER smoothing, too: interpolating two clear camera positions
+    // can cut through the corner of a building. Pull in immediately and
+    // ease back out through the normal position smoothing.
+    final cast = obstructionRaycast;
+    if (cast != null) {
+      _position.setFrom(
+        resolveCameraObstruction(
+          target: _target,
+          eye: _position,
+          raycast: cast,
+        ),
+      );
+    }
+    if ((_position - _target).length2 > 1e-6) {
+      node.lookAtFrom(_position, _target);
+    }
   }
 }

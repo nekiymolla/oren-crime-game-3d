@@ -3,6 +3,8 @@
         android:label="crime_oren"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- Enable GPU for both IDE runs and independently installed builds. -->
+        <meta-data android:name="io.flutter.embedding.android.EnableFlutterGPU" android:value="true" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -20,13 +22,7 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
-            <!-- Без этого автономно установленная сборка (без флага
-                 enable_flutter_gpu из flutter run) падает с "Flutter GPU
-                 must be enabled" — см. PROGRESS.md. -->
-            <meta-data
-              android:name="io.flutter.embedding.android.EnableFlutterGPU"
-              android:value="true"
-              />
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

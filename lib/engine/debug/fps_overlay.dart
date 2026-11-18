@@ -1,5 +1,8 @@
 import 'dart:async';
 import 'dart:collection';
+import 'dart:ui' show FramePhase;
+
+import 'frame_metrics.dart';
 
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -13,10 +16,19 @@ import 'package:flutter/widgets.dart';
 /// [kDebugMode] в main.dart) — игрокам показываться не должен.
 class DebugOverlayController extends ChangeNotifier {
   final _lines = SplayTreeMap<String, String>();
+  bool _visible = false;
+
+  bool get visible => _visible;
+  set visible(bool value) {
+    if (_visible == value) return;
+    _visible = value;
+    notifyListeners();
+  }
 
   void setLine(String key, String value) {
     _lines[key] = value;
-    notifyListeners();
+    // Coordinates are sampled each frame; repaint only on the overlay's
+    // half-second refresh, not on every simulation tick.
   }
 
   void removeLine(String key) {
@@ -49,22 +61,21 @@ class _FpsOverlayState extends State<FpsOverlay> {
   double _frameMs = 0;
   double _uiMs = 0;
   double _rasterMs = 0;
+  double _p95Ms = 0, _latencyMs = 0;
 
   @override
   void initState() {
     super.initState();
-    // addTimingsCallback — единственный честный источник: даёт РЕАЛЬНОЕ время
-    // кадра с разбивкой на UI и raster. Прошлая версия считала дельту между
-    // тиками планировщика, а это не то же самое: когда сцена упирается в GPU,
-    // UI-поток продолжает бежать вперёд по конвейеру, и дельта тиков
-    // показывает бодрые цифры, пока на экране слайдшоу. Android-овский
-    // dumpsys gfxinfo тут тоже не помощник — Flutter с Impeller рисует мимо
-    // HWUI, и gfxinfo видит ноль кадров.
+    // Cadence uses timestamps of rendered frames. totalSpan measures
+    // pipeline latency and can overlap several displayed frames.
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
     // Перерисовываем текст раз в полсекунды, а не на каждый кадр: setState
     // покадрово сам грузил бы UI-поток, то есть инструмент искажал бы то,
     // что измеряет.
-    _refresh = Timer.periodic(const Duration(milliseconds: 500), (_) => _recompute());
+    _refresh = Timer.periodic(
+      const Duration(milliseconds: 500),
+      (_) => _recompute(),
+    );
     widget.controller.addListener(_onDebugLinesChanged);
   }
 
@@ -77,20 +88,26 @@ class _FpsOverlayState extends State<FpsOverlay> {
 
   void _recompute() {
     if (!mounted || _recent.isEmpty) return;
-    var total = 0.0;
+    final metrics = measureFrames(
+      _recent
+          .map((t) => t.timestampInMicroseconds(FramePhase.vsyncStart))
+          .toList(),
+      _recent.map((t) => t.totalSpan.inMicroseconds).toList(),
+    );
     var ui = 0.0;
     var raster = 0.0;
     for (final timing in _recent) {
-      total += timing.totalSpan.inMicroseconds / 1000.0;
       ui += timing.buildDuration.inMicroseconds / 1000.0;
       raster += timing.rasterDuration.inMicroseconds / 1000.0;
     }
     final count = _recent.length;
     setState(() {
-      _frameMs = total / count;
+      _frameMs = metrics.intervalMs;
+      _p95Ms = metrics.p95Ms;
+      _latencyMs = metrics.latencyMs;
       _uiMs = ui / count;
       _rasterMs = raster / count;
-      _fps = _frameMs > 0 ? 1000.0 / _frameMs : 0;
+      _fps = metrics.fps;
     });
   }
 
@@ -111,37 +128,45 @@ class _FpsOverlayState extends State<FpsOverlay> {
         widget.child,
         // Над джойстиком, а не сверху: верхний левый угол занят радаром
         // (ландшафт) и компасом (портрет).
-        Positioned(
-          bottom: MediaQuery.of(context).padding.bottom + 200,
-          left: MediaQuery.of(context).padding.left + 8,
-          child: IgnorePointer(
-            child: Container(
-              padding: const EdgeInsets.all(8),
-              color: const Color(0xAA000000),
-              child: DefaultTextStyle(
-                style: const TextStyle(
-                  color: Color(0xFF00FF66),
-                  fontSize: 12,
-                  fontFamily: 'monospace',
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('FPS: ${_fps.toStringAsFixed(0)}  '
-                        '(${_frameMs.toStringAsFixed(1)} ms avg)'),
-                    // Разбивка по потокам — то, ради чего обычно открывают
-                    // DevTools: какой из двух за бюджетом, тот и чиним.
-                    Text('ui: ${_uiMs.toStringAsFixed(1)}  '
-                        'raster: ${_rasterMs.toStringAsFixed(1)}'),
-                    for (final entry in widget.controller.lines.entries)
-                      Text('${entry.key}: ${entry.value}'),
-                  ],
+        if (widget.controller.visible)
+          Positioned(
+            bottom: MediaQuery.of(context).padding.bottom + 200,
+            left: MediaQuery.of(context).padding.left + 8,
+            child: IgnorePointer(
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                color: const Color(0xAA000000),
+                child: DefaultTextStyle(
+                  style: const TextStyle(
+                    color: Color(0xFF00FF66),
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'FPS: ${_fps.toStringAsFixed(0)}  '
+                        '(${_frameMs.toStringAsFixed(1)} ms avg)',
+                      ),
+                      Text(
+                        'p95 ${_p95Ms.toStringAsFixed(1)} ms  latency ${_latencyMs.toStringAsFixed(1)} ms',
+                      ),
+                      // Разбивка по потокам — то, ради чего обычно открывают
+                      // DevTools: какой из двух за бюджетом, тот и чиним.
+                      Text(
+                        'ui: ${_uiMs.toStringAsFixed(1)}  '
+                        'raster: ${_rasterMs.toStringAsFixed(1)}',
+                      ),
+                      for (final entry in widget.controller.lines.entries)
+                        Text('${entry.key}: ${entry.value}'),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
       ],
     );
   }

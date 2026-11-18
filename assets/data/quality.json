@@ -53,7 +53,7 @@
       "pedestrianPopulation": 16,
       "trafficPopulation": 10,
       "godRaysEnabled": true,
-      "wetReflectionsEnabled": false,
+      "wetReflectionsEnabled": true,
       "precipitationParticles": 1200,
       "maxTrees": 220,
       "texturedGround": true

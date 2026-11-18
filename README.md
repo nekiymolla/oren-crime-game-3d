@@ -13,10 +13,12 @@ Open-world 3D-игра на Flutter/Dart, действие которой про
 ## Запуск
 
 ```sh
-fvm flutter run --enable-flutter-gpu
+fvm flutter run -d macos --enable-flutter-gpu
 ```
 
-Флаг `--enable-flutter-gpu` обязателен — без него 3D-сцена не рендерится.
+Основной desktop-запуск — «Crime Oren · macOS» в Run/Debug IDE.
+Windows, iOS и Android используют тот же проект.
+[Управление, сборки и ограничения](docs/PLATFORMS.md).
 
 ## Архитектура
 

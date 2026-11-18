@@ -3,6 +3,9 @@ import 'dart:math' as math;
 import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
+import 'tree_geometry.dart';
+import 'tree_collision.dart';
+
 /// Процедурная растительность. В реальных OSM-данных Южного района
 /// отдельные деревья почти не размечены (see PROGRESS.md — natural=tree
 /// нашлось 0 штук на весь квартал), поэтому открытые дворы/парки
@@ -12,21 +15,39 @@ import 'package:vector_math/vector_math.dart' as vm;
 /// кроны — второй; добавление дерева — просто ещё одна пара инстансов, а
 /// не новый узел сцены (см. flutter_scene-procedural skill).
 class VegetationBatch {
-  VegetationBatch({this.maxTrees = 220})
-    : trunks = InstancedMesh(
-        geometry: CylinderGeometry(bottomRadius: 0.15, topRadius: 0.12, height: _trunkHeight),
+  factory VegetationBatch({int maxTrees = 220}) {
+    final tree = buildDeciduousTree(
+      leavesPerCluster: maxTrees <= 80
+          ? 24
+          : maxTrees <= 150
+          ? 32
+          : 42,
+    );
+    MeshGeometry geometry(TreeMeshData data) => MeshGeometry.fromArrays(
+      positions: data.vertexPositions,
+      normals: data.vertexNormals,
+      colors: data.vertexColors,
+      retainCpuData: false,
+    );
+    return VegetationBatch._(
+      maxTrees,
+      InstancedMesh(
+        geometry: geometry(tree.branches),
         material: PhysicallyBasedMaterial()
-          ..baseColorFactor = vm.Vector4(0.30, 0.20, 0.12, 1.0)
-          ..roughnessFactor = 0.9,
+          ..baseColorFactor = vm.Vector4.all(1)
+          ..roughnessFactor = 0.96,
       ),
-      canopies = InstancedMesh(
-        geometry: IcosphereGeometry(radius: 1.0, subdivisions: 1),
+      InstancedMesh(
+        geometry: geometry(tree.leaves),
         material: PhysicallyBasedMaterial()
-          ..baseColorFactor = vm.Vector4(0.16, 0.36, 0.14, 1.0)
+          ..baseColorFactor = vm.Vector4.all(1)
+          ..doubleSided = true
           ..roughnessFactor = 0.95,
-      );
+      ),
+    );
+  }
 
-  static const double _trunkHeight = 2.2;
+  VegetationBatch._(this.maxTrees, this.trunks, this.canopies);
 
   /// Деревья сажаются навсегда (см. DistrictStreamer — не убираются вместе
   /// с выгрузкой чанка) и без потолка их число росло бы весь сеанс по мере
@@ -44,6 +65,8 @@ class VegetationBatch {
   /// инстанса в [trunks]/[canopies]. Нужны, чтобы выкорчевать дерево,
   /// оказавшееся внутри дома/дороги из чанка, догруженного позже (см.
   /// [removeTreesWhere]).
+  double Function(double, double)? groundHeightAt;
+  bool Function(double x, double z, double radius)? groundClearance;
   final List<vm.Vector3> _treePositions = [];
   final List<double> _treeScales = [];
 
@@ -52,7 +75,8 @@ class VegetationBatch {
   Node? _node;
   bool _shadowCacheDirty = false;
 
-  late final vm.Vector4 _canopyGreen = (canopies.material as PhysicallyBasedMaterial).baseColorFactor.clone();
+  late final vm.Vector4 _canopyGreen =
+      (canopies.material as PhysicallyBasedMaterial).baseColorFactor.clone();
   double _appliedSnow = 0.0;
 
   /// Снег на кронах (0..1, см. WeatherParams.snowCover): зелень уходит к
@@ -61,7 +85,10 @@ class VegetationBatch {
     if ((cover - _appliedSnow).abs() < 0.01) return;
     _appliedSnow = cover;
     final white = vm.Vector4(0.85, 0.88, 0.92, 1.0);
-    (canopies.material as PhysicallyBasedMaterial).baseColorFactor = _canopyGreen + (white - _canopyGreen) * cover;
+    (canopies.material as PhysicallyBasedMaterial).vertexColorWeight =
+        1.0 - cover;
+    (canopies.material as PhysicallyBasedMaterial).baseColorFactor =
+        _canopyGreen + (white - _canopyGreen) * cover;
   }
 
   /// Один узел на всю растительность игры — держит оба InstancedMesh.
@@ -95,24 +122,29 @@ class VegetationBatch {
   /// [scale] — случайный разброс размера для естественности. Не делает
   /// ничего сверх [maxTrees] — см. его комментарий.
   void addTree(vm.Vector3 position, {double scale = 1.0}) {
+    position = vm.Vector3(
+      position.x,
+      groundHeightAt?.call(position.x, position.z) ?? position.y,
+      position.z,
+    );
     if (_treePositions.length >= maxTrees) return;
+    // Leave room for the actual crown, rather than stacking branches
+    // from neighbouring cells on top of each other.
+    for (var i = 0; i < _treePositions.length; i++) {
+      final reach = treeCanopyRadius * (scale + _treeScales[i]) * 0.8;
+      if ((position - _treePositions[i]).length2 < reach * reach) return;
+    }
     _treePositions.add(position.clone());
     _treeScales.add(scale);
     _markShadowCacheDirty();
-    trunks.addInstance(
-      vm.Matrix4.compose(
-        position + vm.Vector3(0, _trunkHeight * scale / 2, 0),
-        vm.Quaternion.identity(),
-        vm.Vector3.all(scale),
-      ),
+    final yaw = math.sin(position.x * 12.9898 + position.z * 78.233) * math.pi;
+    final transform = vm.Matrix4.compose(
+      position,
+      vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), yaw),
+      vm.Vector3.all(scale),
     );
-    canopies.addInstance(
-      vm.Matrix4.compose(
-        position + vm.Vector3(0, (_trunkHeight + 0.7) * scale, 0),
-        vm.Quaternion.identity(),
-        vm.Vector3(scale, scale * 1.1, scale),
-      ),
-    );
+    trunks.addInstance(transform);
+    canopies.addInstance(transform);
   }
 
   /// Убирает деревья, для которых [test] (корень ствола, масштаб) вернул
@@ -129,15 +161,47 @@ class VegetationBatch {
     }
   }
 
+  /// Trunk-only collision query for walking and the player's vehicle.
+  TreeTrunkHit? castTrunks(
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double maxDistance, {
+    double sweepRadius = 0,
+  }) {
+    if (direction.x * direction.x + direction.z * direction.z < 1e-10) {
+      return null;
+    }
+    TreeTrunkHit? nearest;
+    for (var i = 0; i < _treePositions.length; i++) {
+      final root = _treePositions[i];
+      final reach =
+          maxDistance + treeTrunkRadius * _treeScales[i] + sweepRadius;
+      if ((root.x - origin.x).abs() > reach ||
+          (root.z - origin.z).abs() > reach) {
+        continue;
+      }
+      final hit = raycastTreeTrunk(
+        origin: origin,
+        direction: direction,
+        maxDistance: nearest?.distance ?? maxDistance,
+        root: root,
+        scale: _treeScales[i],
+        sweepRadius: sweepRadius,
+      );
+      if (hit != null) nearest = hit;
+    }
+    return nearest;
+  }
+
   void _markShadowCacheDirty() {
     _shadowCacheDirty = true;
     _node?.shadowStatic = false;
   }
 }
 
-/// Радиус кроны дерева масштаба 1 (IcosphereGeometry радиуса 1.0) — по нему
+/// Консервативный радиус кроны нового дерева масштаба 1 — по нему
 /// проверяется, что крона не влезает в стену дома или не висит над дорогой.
-const double treeCanopyRadius = 1.0;
+const double treeCanopyRadius = 3.1;
 
 /// Свободно ли место под дерево в точке ([x], [z]) с кроной [radius]: пять
 /// вертикальных лучей (ствол + четыре края кроны) по каждому из [roots] не
@@ -147,7 +211,13 @@ const double treeCanopyRadius = 1.0;
 /// раскладываются по ячейкам по центру bbox'а (grid_split.mjs), так что дом
 /// или длинная дорога из соседней ячейки физически лежат и в этой.
 bool isTreeSpotClear(Iterable<Node> roots, double x, double z, double radius) {
-  const offsets = [(0.0, 0.0), (1.0, 0.0), (-1.0, 0.0), (0.0, 1.0), (0.0, -1.0)];
+  const offsets = [
+    (0.0, 0.0),
+    (1.0, 0.0),
+    (-1.0, 0.0),
+    (0.0, 1.0),
+    (0.0, -1.0),
+  ];
   for (final root in roots) {
     for (final (dx, dz) in offsets) {
       final hit = raycastNode(
@@ -179,6 +249,7 @@ void scatterTreesForChunk({
   required double cellSizeMeters,
   int attempts = 24,
   math.Random? random,
+  bool Function(double x, double z, double radius)? groundClearance,
 }) {
   final rng = random ?? math.Random();
   final half = cellSizeMeters / 2;
@@ -186,7 +257,12 @@ void scatterTreesForChunk({
     final x = cellCenter.x + (rng.nextDouble() * 2 - 1) * half;
     final z = cellCenter.y + (rng.nextDouble() * 2 - 1) * half;
     final scale = 0.8 + rng.nextDouble() * 0.5;
-    if (!isTreeSpotClear(obstacleRoots, x, z, treeCanopyRadius * scale)) continue;
+    final clear =
+        groundClearance?.call(x, z, treeCanopyRadius * scale) ??
+        isTreeSpotClear(obstacleRoots, x, z, treeCanopyRadius * scale);
+    if (!clear) {
+      continue;
+    }
     vegetation.addTree(vm.Vector3(x, 0, z), scale: scale);
   }
 }

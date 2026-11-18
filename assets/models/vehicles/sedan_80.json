@@ -1,0 +1,47 @@
+{
+  "source": "https://grab3d.com/models/vehicles/1980s-sedan/",
+  "license": "CC0-1.0",
+  "sourceSha256": "3c68f031d3d6833aa8c8b6bcceb636b4d7f18842815c2043a2bc1f44d7753a44",
+  "maxTextureSize": 1024,
+  "width": 1.7856358289718628,
+  "height": 1.409999966621399,
+  "length": 4.598999977111816,
+  "wheelRadius": 0.30000001192092896,
+  "wheelbase": 2.6500000059604645,
+  "wheels": [
+    {
+      "name": "Wheel_FR",
+      "centerGame": [
+        -0.7199999094009399,
+        0.30000001192092896,
+        1.3804998397827148
+      ]
+    },
+    {
+      "name": "Wheel_FL",
+      "centerGame": [
+        0.720000147819519,
+        0.30000001192092896,
+        1.3804998397827148
+      ]
+    },
+    {
+      "name": "Wheel_RR",
+      "centerGame": [
+        -0.7200000286102295,
+        0.30000001192092896,
+        -1.2695001661777496
+      ]
+    },
+    {
+      "name": "Wheel_RL",
+      "centerGame": [
+        0.7200000286102295,
+        0.30000001192092896,
+        -1.2695001661777496
+      ]
+    }
+  ],
+  "frontLampTriangles": 308,
+  "rearLampTriangles": 392
+}

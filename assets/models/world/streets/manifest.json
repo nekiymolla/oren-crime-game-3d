@@ -1,0 +1,181 @@
+{
+  "source": "https://api.openstreetmap.org/api/0.6/map?bbox=55.09994,51.71102,55.11444,51.72000",
+  "pavingPieces": 1579,
+  "curbPieces": 3060,
+  "fenceSections": 63,
+  "equipment": 7,
+  "chunks": [
+    {
+      "file": "district_1_0.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-1_-2.glb",
+      "triangles": 28820
+    },
+    {
+      "file": "district_-2_0.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_1_-2.glb",
+      "triangles": 12
+    },
+    {
+      "file": "district_-2_-1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-2_-3.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-1_0.glb",
+      "triangles": 10740
+    },
+    {
+      "file": "district_0_0.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-3_1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-1_1.glb",
+      "triangles": 4944
+    },
+    {
+      "file": "district_-3_-2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_0_2.glb",
+      "triangles": 984
+    },
+    {
+      "file": "district_-3_-3.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_1_1.glb",
+      "triangles": 168
+    },
+    {
+      "file": "district_0_-1.glb",
+      "triangles": 4032
+    },
+    {
+      "file": "district_0_1.glb",
+      "triangles": 252
+    },
+    {
+      "file": "district_-1_-1.glb",
+      "triangles": 67314
+    },
+    {
+      "file": "district_-1_2.glb",
+      "triangles": 1428
+    },
+    {
+      "file": "district_2_1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-3_0.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-1_-3.glb",
+      "triangles": 26606
+    },
+    {
+      "file": "district_0_-2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_1_-3.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_1_-1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_0_-3.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-2_1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-3_-1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-2_2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_2_-1.glb",
+      "triangles": 1152
+    },
+    {
+      "file": "district_-3_2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-2_-2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_1_2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_2_0.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_2_2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_3_1.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_2_-2.glb",
+      "triangles": 528
+    },
+    {
+      "file": "district_3_-3.glb",
+      "triangles": 1296
+    },
+    {
+      "file": "district_-4_-2.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_2_-3.glb",
+      "triangles": 936
+    },
+    {
+      "file": "district_3_-1.glb",
+      "triangles": 1272
+    },
+    {
+      "file": "district_-4_-4.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_-2_-4.glb",
+      "triangles": 0
+    },
+    {
+      "file": "district_3_0.glb",
+      "triangles": 0
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import 'hud_info.dart';
 import '../core/quality_settings.dart';
 import '../pedestrians/pedestrian_system.dart';
 import '../player/character_collision_field.dart';
+import '../player/character_motion.dart' show CharacterRayHit;
 import '../player/character_controller_component.dart';
 import '../player/game_camera_controller.dart';
 import '../player/player_health.dart';
@@ -49,10 +50,15 @@ import '../weapons/weapon_state.dart';
 import '../world/building_facades.dart';
 import '../world/district.dart';
 import '../world/district_streamer.dart';
+import '../world/city_map.dart';
+import '../world/city_surface.dart';
+import '../world/street_lights.dart';
 import '../world/nav_grid.dart';
 import '../world/neon_signs.dart';
 import '../world/road_graph.dart';
 import '../world/terrain.dart';
+import '../world/terrain_height.dart';
+import '../world/tree_placement.dart';
 import '../world/vegetation.dart';
 import '../world/world_config.dart';
 
@@ -73,8 +79,13 @@ class Game {
   final bool debugShowRoadGraph;
 
   final Scene scene = Scene();
+  late final CityMap cityMap;
+  late final StreetLights streetLights;
+  final benchRest = BenchRest();
+  int _restDamageRevision = 0;
   late final Node playerNode;
   late final Node cameraNode;
+
   /// Машина, за рулём которой игрок или в которую садился последней.
   /// Меняется при угоне (см. [_carjack]) и при пересадке в брошенную.
   late BuiltVehicle vehicle;
@@ -143,6 +154,8 @@ class Game {
   /// ради плоской зелёной заливки — первый кандидат. Держим ссылки, чтобы
   /// debug-панель могла погасить их по одному и измерить вклад каждого.
   Node? _groundNode;
+  late final TerrainHeight terrain;
+  TexturedGround? _terrainView;
   Node? _vegetationNode;
   VegetationBatch? _vegetation;
 
@@ -251,6 +264,7 @@ class Game {
   /// камеры за курсом машины в это время не работает, чтобы не бороться с
   /// рукой игрока.
   bool userIsAdjustingCamera = false;
+  double _cameraManualGrace = 0.0;
 
   /// Скорость авто-довода камеры за курсом машины, рад/с на радиан
   /// расхождения (экспоненциальное сглаживание, не мгновенный доворот).
@@ -283,9 +297,22 @@ class Game {
     // между дорогами/зданиями (osm2world строит поверхности только там, где
     // OSM что-то размечает, а разметка реального района местами скудная —
     // см. PROGRESS.md).
-    final textured = quality.texturedGround ? await TexturedGround.load(sizeMeters: groundSizeMeters) : null;
-    final ground = (textured?.node ?? buildPlaceholderGround(sizeMeters: groundSizeMeters))
-      ..position = vm.Vector3(0, -0.05, 0);
+    cityMap = await CityMap.load();
+    _facades.profiles = cityMap.facadeProfiles;
+    final nav = protectCitySurfaces(await NavGrid.load(), cityMap.surfaces);
+    terrain = TerrainHeight(nav);
+    streetLights = StreetLights(cityMap);
+    scene.add(streetLights.node);
+    final textured = await TexturedGround.load(
+      sizeMeters: groundSizeMeters,
+      height: terrain,
+      textured: quality.texturedGround,
+    );
+    _terrainView = textured;
+    textured?.updateAround(vm.Vector3(-79, 0, 17));
+    final ground =
+        (textured?.node ?? buildPlaceholderGround(sizeMeters: groundSizeMeters))
+          ..position = vm.Vector3(0, textured == null ? -0.05 : 0, 0);
     _groundNode = ground;
     scene.add(ground);
     scene.add(_buildSun());
@@ -303,7 +330,9 @@ class Game {
         _facades.night = night;
       },
       unlitSurfaces: [
-        if (ground.mesh!.primitives.first.material case final UnlitMaterial flat) flat,
+        if (ground.mesh?.primitives.first.material
+            case final UnlitMaterial flat)
+          flat,
       ],
       onUnlitTint: textured?.update,
     );
@@ -314,7 +343,10 @@ class Game {
       maxParticles: quality.precipitationParticles,
     );
     scene.add(_weatherView.buildNode());
-    _wetRoads = WetRoadsView(scene: scene, reflectionsAllowed: () => quality.wetReflectionsEnabled);
+    _wetRoads = WetRoadsView(
+      scene: scene,
+      reflectionsAllowed: () => quality.wetReflectionsEnabled,
+    );
     dayNight.visibleSky = shaderSky;
     if (neonSignsEnabled) await _buildNeon();
     // Сразу выставить небо/свет на стартовое время — иначе первый кадр был
@@ -324,6 +356,19 @@ class Game {
     worldConfig = await loadWorldConfig();
     final districtManifest = await loadDistrictManifest();
     final vegetation = VegetationBatch(maxTrees: quality.maxTrees);
+    vegetation.groundHeightAt = terrain.heightAt;
+    vegetation.groundClearance = (x, z, radius) =>
+        isTreeGroundClear(nav, x, z, radius) && cityMap.treeClear(x, z, radius);
+    // Authored rows are explicitly marked inferred in city_map.json.
+    // Prioritise their positions before generic grass scatter fills the cap.
+    for (final tree in cityMap.fixtures.where((f) => f.kind == 'tree')) {
+      if (isTreeGroundClear(nav, tree.x, tree.z, 2.7)) {
+        vegetation.addTree(
+          tree.position,
+          scale: .82 + ((tree.x.abs() * .13) % .3),
+        );
+      }
+    }
     _vegetation = vegetation;
     final vegetationNode = vegetation.buildNode();
     _vegetationNode = vegetationNode;
@@ -349,8 +394,12 @@ class Game {
 
     // Навигационная сетка (асфальт/тротуар/земля/дома) — по ней ходят
     // пешеходы и проверяются полосы трафика (lib/world/nav_grid.dart).
-    final nav = await NavGrid.load();
-    pedestrians = PedestrianSystem(nav: nav, population: quality.pedestrianPopulation, characters: _characters);
+    pedestrians = PedestrianSystem(
+      nav: nav,
+      groundHeightAt: terrain.heightAt,
+      population: quality.pedestrianPopulation,
+      characters: _characters,
+    );
     scene.add(pedestrians.buildNode());
     bool onAsphalt(vm.Vector3 from, vm.Vector3 to) =>
         nav.badFraction(from.x, from.z, to.x, to.z, nav.isDrivable) <= 0.05;
@@ -360,13 +409,16 @@ class Game {
       edgeIsClear: onAsphalt,
       characters: _characters,
     );
+    policeSystem.officers.groundHeightAt = terrain.heightAt;
     final trafficNetwork = TrafficNetwork(
       roadGraph,
       // Полоса — только по асфальту (допуск 5% на края клеток сетки).
       laneIsClear: onAsphalt,
     );
     // ignore: avoid_print
-    print('Трафик: отброшено полос не по асфальту: ${trafficNetwork.rejectedLaneCount}');
+    print(
+      'Трафик: отброшено полос не по асфальту: ${trafficNetwork.rejectedLaneCount}',
+    );
     signals = TrafficSignals.fromNetwork(trafficNetwork);
     _signalsView = TrafficSignalsView(signals);
     scene.add(_signalsView.buildNode());
@@ -383,8 +435,13 @@ class Game {
       manifest: districtManifest,
       radiusCells: worldConfig.streamingRadiusChunks,
       vegetation: vegetation,
+      onChunkUnloaded: (chunk) {
+        _facades.unregisterChunk(chunk);
+        streetLights.unregisterChunk(chunk);
+      },
+      onChunkPrepare: _facades.registerChunk,
       onChunkLoaded: (chunk) {
-        _facades.registerChunk(chunk);
+        streetLights.registerChunk(chunk);
         dayNight.registerChunk(chunk);
         _wetRoads.registerChunk(chunk);
       },
@@ -397,19 +454,34 @@ class Game {
     // к моменту первой проверки _isEdgePassable — путь ошибочно считался
     // "открытым" не из-за бага рейкаста, а из-за отсутствующей геометрии
     // (см. DistrictStreamer.updateAroundPosition, BUGS.md).
-    await districtStreamer.updateAroundPosition(worldConfig.playerSpawnPosition);
+    await districtStreamer.updateAroundPosition(
+      worldConfig.playerSpawnPosition,
+    );
 
     // Область, по которой идут лучи персонажа: ближние чанки района плюс
     // машины в пределах досягаемости. Всё остальное (плейсхолдер-земля,
     // растительность, пешеходы, отладочные линии, камера, свет) в обход не
     // попадает вообще — землю заменяет groundPlaneHeight в контроллере.
-    final collisionField = _collisionField = CharacterCollisionField(districtStreamer: districtStreamer);
+    final collisionField = _collisionField = CharacterCollisionField(
+      districtStreamer: districtStreamer,
+      additionalRaycast: (origin, direction, distance) {
+        final fence = cityMap.castBarriers(origin, direction, distance);
+        final hit = vegetation.castTrunks(
+          origin,
+          direction,
+          fence?.distance ?? distance,
+        );
+        if (hit == null) return fence;
+        return CharacterRayHit(distance: hit.distance, normal: hit.normal);
+      },
+    );
 
     final movement = _movement = CharacterControllerComponent(
-      walkSpeed: 4.5,
-      runMultiplier: 1.8,
+      walkSpeed: 1.65,
+      runMultiplier: 3.3,
       jumpVelocity: 6.0,
       groundPlaneHeight: 0.0,
+      groundHeightAt: terrain.heightAt,
       bodyRadius: _defaultObstacleRadius,
       raycast: collisionField.cast,
     );
@@ -424,8 +496,11 @@ class Game {
     // Рядом со спавном игрока (см. WorldConfig.playerSpawnPosition) — тот же
     // открытый парк, чтобы машина была видна и доступна сразу.
     vehicle = await buildPlaceholderSedan();
-    _stolenCarSpec = await loadVehicleSpec('car_sedan_01') ?? fallbackVehicleSpec;
-    vehicle.node.position = worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
+    vehicle.controller.groundHeightAt = terrain.heightAt;
+    _stolenCarSpec =
+        await loadVehicleSpec('car_sedan_01') ?? fallbackVehicleSpec;
+    vehicle.node.position =
+        worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
     scene.add(vehicle.node);
 
     // Пара припаркованных машин для разнообразия ("больше машин", см.
@@ -437,6 +512,18 @@ class Game {
     final parkedPickup = buildStaticVehicleVisual(VehicleArchetype.suv)
       ..position = worldConfig.playerSpawnPosition + vm.Vector3(-8, 0, 6)
       ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4);
+    if (cityMap.parking.length >= 2) {
+      parkedHatchback.position = cityMap.parking[0].position;
+      parkedHatchback.rotation = vm.Quaternion.axisAngle(
+        vm.Vector3(0, 1, 0),
+        cityMap.parking[0].yaw,
+      );
+      parkedPickup.position = cityMap.parking[1].position;
+      parkedPickup.rotation = vm.Quaternion.axisAngle(
+        vm.Vector3(0, 1, 0),
+        cityMap.parking[1].yaw,
+      );
+    }
     scene.add(parkedHatchback);
     scene.add(parkedPickup);
 
@@ -446,7 +533,11 @@ class Game {
     // приходят колбэком: их набор меняется по звёздам розыска.
     _decorCars.addAll([parkedHatchback, parkedPickup]);
     collisionField.addColliderSource(
-      () => [vehicle.node, for (final car in _parkedPlayerCars) car.node, ..._decorCars],
+      () => [
+        vehicle.node,
+        for (final car in _parkedPlayerCars) car.node,
+        ..._decorCars,
+      ],
     );
     collisionField.addColliderSource(() => policeSystem.unitNodes);
     collisionField.addColliderSource(() => traffic.carNodes);
@@ -466,6 +557,7 @@ class Game {
       distance: _cameraDistance,
       lookHeight: 1.5,
       minPitch: -1.0,
+      obstructionRaycast: _castCameraObstruction,
     );
     cameraNode.addComponent(cameraController);
     scene.add(cameraNode);
@@ -473,11 +565,20 @@ class Game {
     // Движение камеры-относительное ("вперёд" на джойстике = "от камеры",
     // а не "куда сейчас смотрит персонаж") — мосту нужен уже готовый
     // cameraController, поэтому он добавляется последним.
-    playerNode.addComponent(PlayerInputBridgeComponent(movement, cameraController, isLocked: () => isDead));
+    playerNode.addComponent(
+      PlayerInputBridgeComponent(
+        movement,
+        cameraController,
+        isLocked: () => isDead,
+      ),
+    );
 
     _economy = await loadEconomyConfig();
     wallet = Wallet(_economy.startingMoney);
-    _pickups = PickupField(lifetimeSeconds: _economy.pickupLifetimeSeconds, collectRadius: _economy.pickupRadius);
+    _pickups = PickupField(
+      lifetimeSeconds: _economy.pickupLifetimeSeconds,
+      collectRadius: _economy.pickupRadius,
+    );
     _pickupsView = PickupsView(_pickups);
     scene.add(_pickupsView.buildNode());
 
@@ -525,7 +626,11 @@ class Game {
     wallet.restore(save.money);
     properties.owned
       ..clear()
-      ..addAll(save.ownedProperties.where((id) => properties.properties.any((p) => p.id == id)));
+      ..addAll(
+        save.ownedProperties.where(
+          (id) => properties.properties.any((p) => p.id == id),
+        ),
+      );
     playerNode.position = save.position;
     _movement?.teleport(save.position, yaw: save.yaw);
     playerHealth
@@ -533,14 +638,21 @@ class Game {
       ..armor = save.armor.clamp(0.0, PlayerHealth.maxArmor);
     if (save.weaponId == weapon.config.id) {
       weapon
-        ..ammoInMagazine = save.ammoInMagazine.clamp(0, weapon.config.magazineSize)
+        ..ammoInMagazine = save.ammoInMagazine.clamp(
+          0,
+          weapon.config.magazineSize,
+        )
         ..reserveAmmo = save.reserveAmmo.clamp(0, 9999);
     }
     clock
       ..hours = save.clockHours.clamp(0.0, 23.99)
       ..dayOfYear = save.dayOfYear;
-    final savedWeather = WeatherKind.values.where((kind) => kind.name == save.weather);
-    if (savedWeather.isNotEmpty) weather.setWeather(savedWeather.first, immediately: true);
+    final savedWeather = WeatherKind.values.where(
+      (kind) => kind.name == save.weather,
+    );
+    if (savedWeather.isNotEmpty) {
+      weather.setWeather(savedWeather.first, immediately: true);
+    }
     final preset = qualityPresets.presets[save.qualityPreset];
     if (preset != null) applyQuality(preset);
   }
@@ -572,7 +684,9 @@ class Game {
       ..shadowCascadeCount = settings.shadowCascadeCount
       ..shadowMaxDistance = settings.shadowMaxDistance
       ..shadowMapResolution = settings.shadowMapResolution;
-    _cameraComponent?.projection = PerspectiveProjection(far: settings.drawDistanceMeters);
+    _cameraComponent?.projection = PerspectiveProjection(
+      far: settings.drawDistanceMeters,
+    );
     _applyEnvironmentSettings();
   }
 
@@ -622,10 +736,14 @@ class Game {
   /// поиска ближайшей машины.
   VehicleInteraction? get vehicleInteraction {
     if (isDead) return null;
-    if (gameModeState.mode == ControlMode.driving) return VehicleInteraction.exit;
+    if (gameModeState.mode == ControlMode.driving) {
+      return VehicleInteraction.exit;
+    }
     final target = _nearestEnterable();
     if (target == null) return null;
-    return target.stolen != null ? VehicleInteraction.carjack : VehicleInteraction.enter;
+    return target.stolen != null
+        ? VehicleInteraction.carjack
+        : VehicleInteraction.enter;
   }
 
   /// Ближайшая машина в радиусе посадки: своя (текущая или брошенная) или
@@ -635,14 +753,21 @@ class Game {
     BuiltVehicle? own;
     var ownDistance = vehicleInteractRadius;
     for (final car in [vehicle, ..._parkedPlayerCars]) {
-      final distance = (car.node.globalTransform.getTranslation() - playerPos).length;
+      final distance =
+          (car.node.globalTransform.getTranslation() - playerPos).length;
       if (distance <= ownDistance) {
         ownDistance = distance;
         own = car;
       }
     }
-    final stolen = traffic.stealableNear(playerPos, radius: vehicleInteractRadius, maxSpeed: _carjackMaxSpeed);
-    if (stolen != null && (own == null || (stolen.car.position - playerPos).length < ownDistance)) {
+    final stolen = traffic.stealableNear(
+      playerPos,
+      radius: vehicleInteractRadius,
+      maxSpeed: _carjackMaxSpeed,
+    );
+    if (stolen != null &&
+        (own == null ||
+            (stolen.car.position - playerPos).length < ownDistance)) {
       return (own: null, stolen: stolen);
     }
     return own == null ? null : (own: own, stolen: null);
@@ -652,6 +777,15 @@ class Game {
   /// цели [vehicleInteraction]. Переключает и куда едет камера, и откуда
   /// читается джойстик (см. [GameModeState]).
   void toggleVehicle() {
+    // The old touch control may disappear while held. Never carry its
+    // throttle, sprint or fire state into the new control mode.
+    inputState
+      ..setMove(0, 0)
+      ..isRunning = false
+      ..handbrakeHeld = false
+      ..fireHeld = false;
+    inputState.aimHeld = false;
+    inputState.consumeJump();
     if (gameModeState.mode == ControlMode.driving) {
       final vehiclePos = vehicle.node.globalTransform.getTranslation();
       final heading = vehicle.controller.heading;
@@ -700,17 +834,47 @@ class Game {
     vehicle = built;
 
     final left = vm.Vector3(math.cos(car.heading), 0, -math.sin(car.heading));
-    pedestrians.spawnFleeingDriver(car.position + left * 1.6, playerNode.globalTransform.getTranslation());
+    pedestrians.spawnFleeingDriver(
+      car.position + left * 1.6,
+      playerNode.globalTransform.getTranslation(),
+    );
     wantedSystem.reportMinorCrime();
   }
 
-  /// Звук удара для машины игрока — поверх обработчика повреждений.
+  /// Стволы и звук удара для машины игрока — поверх обработчика повреждений.
   void _hookCrashSound(BuiltVehicle car) {
+    car.controller.additionalObstacleSweep =
+        (origin, direction, distance, radius) => _vegetation
+            ?.castTrunks(origin, direction, distance, sweepRadius: radius)
+            ?.distance;
     if (!_crashHooked.add(car)) return;
+    final field = CharacterCollisionField(
+      districtStreamer: districtStreamer,
+      probeRadiusMeters: 8,
+      probeBelowMeters: 2,
+      probeAboveMeters: 3,
+      additionalRaycast: cityMap.castBarriers,
+    );
+    field.addColliderSource(
+      () => [
+        if (!identical(car, vehicle)) vehicle.node,
+        for (final other in _parkedPlayerCars)
+          if (!identical(car, other)) other.node,
+        ..._decorCars,
+        ...policeSystem.unitNodes,
+        ...traffic.carNodes,
+      ],
+    );
+    car.controller
+      ..groundHeightAt = terrain.heightAt
+      ..obstacleRaycast = field.cast
+      ..prepareObstacles = field.refresh;
     final previous = car.controller.onCollision;
     car.controller.onCollision = (impactSpeed) {
       previous?.call(impactSpeed);
-      if (impactSpeed > 2.0) audio.crash(car.node.globalTransform.getTranslation(), impactSpeed);
+      if (impactSpeed > 2.0) {
+        audio.crash(car.node.globalTransform.getTranslation(), impactSpeed);
+      }
     };
   }
 
@@ -733,17 +897,16 @@ class Game {
       shadowMapResolution: quality.shadowMapResolution,
     );
     _sunLight = sunLight;
-    final sunNode = _sunNode = Node()..addComponent(DirectionalLightComponent(sunLight));
+    final sunNode = _sunNode = Node()
+      ..addComponent(DirectionalLightComponent(sunLight));
     // Компонент светит вдоль local +Z узла, поэтому направление задаётся
     // поворотом узла, а не полем DirectionalLight.direction.
     sunNode.lookAt(_sunLightDirection);
     return sunNode;
   }
 
-  /// Неоновые вывески отложены до этапа детализации (решение 15.10.2026:
-  /// сейчас важнее геймплей MVP). Код, данные и шейдер на месте —
-  /// вернуть можно, поставив true.
-  static const bool neonSignsEnabled = false;
+  /// Неоновые вывески (включены на этапе детализации 16.10.2026).
+  static const bool neonSignsEnabled = true;
 
   /// Неон — вывески из assets/data/neon_signs.json и мягкие пятна света от
   /// них (шейдер neon_glow.fmat). Не загрузился шейдер — вывески без пятен.
@@ -756,7 +919,7 @@ class Game {
       // ignore: avoid_print
       print('Шейдер пятен неона не загрузился: $error');
     }
-    final neon = _neon = NeonSignsView(signs, glowMaterial: glow);
+    final neon = _neon = await NeonSignsView.build(signs, glowMaterial: glow);
     scene.add(neon.buildNode());
   }
 
@@ -871,8 +1034,12 @@ class Game {
     const totalHeight = _playerCapsuleHeight + _playerCapsuleRadius * 2;
     final meshNode = Node(
       mesh: Mesh(
-        CapsuleGeometry(radius: _playerCapsuleRadius, height: _playerCapsuleHeight),
-        PhysicallyBasedMaterial()..baseColorFactor = vm.Vector4(0.82, 0.18, 0.18, 1.0),
+        CapsuleGeometry(
+          radius: _playerCapsuleRadius,
+          height: _playerCapsuleHeight,
+        ),
+        PhysicallyBasedMaterial()
+          ..baseColorFactor = vm.Vector4(0.82, 0.18, 0.18, 1.0),
       ),
     )..position = vm.Vector3(0, totalHeight / 2, 0);
     node.add(meshNode);
@@ -891,11 +1058,24 @@ class Game {
   ///
   /// [includePolice] = false — без патрульных машин: офицер стоит вплотную
   /// к своей и стреляет мимо неё, иначе она закрывала бы ему обзор.
-  double? _bulletRaycast(vm.Vector3 origin, vm.Vector3 direction, double maxDistance, {bool includePolice = true}) {
+  double? _bulletRaycast(
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double maxDistance, {
+    bool includePolice = true,
+  }) {
     final end = origin + direction * maxDistance;
     _bulletBox
-      ..min.setValues(math.min(origin.x, end.x), math.min(origin.y, end.y), math.min(origin.z, end.z))
-      ..max.setValues(math.max(origin.x, end.x), math.max(origin.y, end.y), math.max(origin.z, end.z));
+      ..min.setValues(
+        math.min(origin.x, end.x),
+        math.min(origin.y, end.y),
+        math.min(origin.z, end.z),
+      )
+      ..max.setValues(
+        math.max(origin.x, end.x),
+        math.max(origin.y, end.y),
+        math.max(origin.z, end.z),
+      );
     _bulletCandidates.clear();
     districtStreamer.collectChunksOverlapping(_bulletBox, _bulletCandidates);
     final reachSq = (maxDistance + 4.0) * (maxDistance + 4.0);
@@ -907,14 +1087,18 @@ class Game {
       if (includePolice) ...policeSystem.unitNodes,
     ];
     for (final car in cars) {
-      if ((car.globalTransform.getTranslation() - origin).length2 <= reachSq) _bulletCandidates.add(car);
+      if ((car.globalTransform.getTranslation() - origin).length2 <= reachSq) {
+        _bulletCandidates.add(car);
+      }
     }
 
     final ray = vm.Ray.originDirection(origin, direction);
     double? nearest;
     for (final root in _bulletCandidates) {
       final hit = raycastNode(root, ray, maxDistance: nearest ?? maxDistance);
-      if (hit != null && (nearest == null || hit.distance < nearest)) nearest = hit.distance;
+      if (hit != null && (nearest == null || hit.distance < nearest)) {
+        nearest = hit.distance;
+      }
     }
     return nearest;
   }
@@ -935,7 +1119,8 @@ class Game {
     if (inputState.consumeReload()) weapon.startReload();
     if (inputState.fireHeld) _aimHoldSeconds = _aimHoldAfterShot;
     _aimHoldSeconds = math.max(0.0, _aimHoldSeconds - deltaSeconds);
-    final aiming = inputState.fireHeld || _aimHoldSeconds > 0.0;
+    final aiming =
+        inputState.aimHeld || inputState.fireHeld || _aimHoldSeconds > 0.0;
     cameraController.aiming = aiming;
     _movement?.facingYawOverride = aiming ? cameraController.yaw : null;
     if (!inputState.fireHeld) return;
@@ -944,7 +1129,11 @@ class Game {
     // доворачивается к нему за доли секунды).
     final forward = cameraController.forward;
     final right = cameraController.right;
-    final muzzle = playerNode.globalTransform.getTranslation() + vm.Vector3(0, 1.35, 0) + forward * 0.5 + right * 0.3;
+    final muzzle =
+        playerNode.globalTransform.getTranslation() +
+        vm.Vector3(0, 1.35, 0) +
+        forward * 0.5 +
+        right * 0.3;
     final shot = _shooting.tryFire(
       eye: cameraController.eyePosition,
       viewDirection: cameraController.viewDirection,
@@ -957,7 +1146,11 @@ class Game {
     for (final bullet in shot.bullets) {
       if (bullet.impact == BulletImpact.world) audio.bulletImpact(bullet.end);
     }
-    wantedSystem.reportShooting(witnesses: shot.witnesses, wounded: shot.wounded, killed: shot.killed);
+    wantedSystem.reportShooting(
+      witnesses: shot.witnesses,
+      wounded: shot.wounded,
+      killed: shot.killed,
+    );
     for (final kill in shot.kills) {
       _dropLoot(kill.feet, kill.kind);
     }
@@ -970,11 +1163,22 @@ class Game {
     final model = _playerModel;
     if (model == null || isDriving) return;
     final speed = isDead ? 0.0 : (_movement?.horizontalSpeed ?? 0.0);
-    final choice = locomotionAnim(speed: speed, lying: isDead, aiming: cameraController.aiming);
+    final choice = locomotionAnim(
+      speed: speed,
+      lying: isDead,
+      aiming: cameraController.aiming,
+      previous: model.current,
+    );
     if (_firedThisFrame && choice.anim == CharacterAnim.aim) {
       model.play(CharacterAnim.shoot, fadeSeconds: 0.05, restart: true);
-    } else if (model.current != CharacterAnim.shoot || model.currentFinished || choice.anim != CharacterAnim.aim) {
-      model.play(choice.anim, rate: choice.rate, fadeSeconds: isDead ? 0.12 : 0.2);
+    } else if (model.current != CharacterAnim.shoot ||
+        model.currentFinished ||
+        choice.anim != CharacterAnim.aim) {
+      model.play(
+        choice.anim,
+        rate: choice.rate,
+        fadeSeconds: isDead ? 0.12 : 0.2,
+      );
     }
     model.update(deltaSeconds);
   }
@@ -982,17 +1186,42 @@ class Game {
   /// Добыча с убитого: деньги, а с полицейского ещё и патроны (иначе
   /// патроны кончались бы насовсем — магазинов пока нет).
   void _dropLoot(vm.Vector3 feet, TargetKind kind) {
-    final drop = kind == TargetKind.officer ? _economy.officerDrop : _economy.pedestrianDrop;
+    final drop = kind == TargetKind.officer
+        ? _economy.officerDrop
+        : _economy.pedestrianDrop;
     final money = drop.rollMoney(_random);
-    if (money > 0) _pickups.drop(Pickup(position: feet + vm.Vector3(0.4, 0, 0), money: money));
-    if (drop.ammo > 0) _pickups.drop(Pickup(position: feet + vm.Vector3(-0.4, 0, 0.3), money: 0, ammo: drop.ammo));
-    if (drop.rollArmor(_random)) _pickups.drop(Pickup(position: feet + vm.Vector3(0, 0, -0.5), money: 0, armor: drop.armor));
+    if (money > 0) {
+      _pickups.drop(
+        Pickup(position: feet + vm.Vector3(0.4, 0, 0), money: money),
+      );
+    }
+    if (drop.ammo > 0) {
+      _pickups.drop(
+        Pickup(
+          position: feet + vm.Vector3(-0.4, 0, 0.3),
+          money: 0,
+          ammo: drop.ammo,
+        ),
+      );
+    }
+    if (drop.rollArmor(_random)) {
+      _pickups.drop(
+        Pickup(
+          position: feet + vm.Vector3(0, 0, -0.5),
+          money: 0,
+          armor: drop.armor,
+        ),
+      );
+    }
   }
 
   /// Добыча на земле: стареет, подбирается проходом рядом (пешком или на
   /// машине), мёртвый не подбирает.
   void _updatePickups(double deltaSeconds, vm.Vector3 trackedPosition) {
-    final collected = _pickups.update(deltaSeconds, isDead ? null : trackedPosition);
+    final collected = _pickups.update(
+      deltaSeconds,
+      isDead ? null : trackedPosition,
+    );
     for (final item in collected) {
       wallet.earn(item.money, TransactionReason.pickup);
       weapon.reserveAmmo += item.ammo;
@@ -1003,16 +1232,56 @@ class Game {
     _propertyMarkers.update(deltaSeconds);
   }
 
+  CityFixture? get nearbyBench {
+    if (isDead ||
+        gameModeState.mode != ControlMode.onFoot ||
+        wantedState.stars > 0) {
+      return null;
+    }
+    final p = playerNode.position;
+    final found = cityMap.nearby('bench', p.x, p.z, radius: 2.5, limit: 1);
+    return found.isEmpty ? null : found.first;
+  }
+
+  void restAtBench() {
+    final bench = nearbyBench;
+    if (bench == null) return;
+    _restDamageRevision = playerHealth.damageRevision;
+    benchRest.start(bench, playerNode.position);
+  }
+
   /// Узел, за которым сейчас "следит" мир — игрок пешком или машина за
   /// рулём. Публичный, чтобы HUD мог показать координаты в debug-оверлее
   /// (см. GameView) без дублирования этой развилки по gameModeState.
-  Node get trackedNode => gameModeState.mode == ControlMode.driving ? vehicle.node : playerNode;
+  Node get trackedNode =>
+      gameModeState.mode == ControlMode.driving ? vehicle.node : playerNode;
 
   /// Общая для всей игры логика тика (таймеры, спавн и т.д.), не привязанная
   /// к одному узлу. Per-node поведение живёт в компонентах, а не здесь.
   void tick(double deltaSeconds) {
     final trackedPosition = trackedNode.globalTransform.getTranslation();
     districtStreamer.updateAroundPosition(trackedPosition);
+    final night = dayNight.lighting?.nightFactor ?? 0.0;
+    if (streetLights.update(trackedPosition, night)) {
+      _terrainView?.updateStreetLights(
+        streetLights.selected.map((f) => f.groundLight).toList(),
+        night,
+      );
+    }
+    if (benchRest.update(
+      deltaSeconds,
+      trackedPosition,
+      allowed:
+          !isDead &&
+          gameModeState.mode == ControlMode.onFoot &&
+          wantedState.stars == 0 &&
+          playerHealth.damageRevision == _restDamageRevision,
+    )) {
+      playerHealth.health = math.min(
+        PlayerHealth.maxHealth,
+        playerHealth.health + 20,
+      );
+    }
 
     // Пересобираем узкий список корней обхода для лучей персонажа — раз в
     // кадр и ДО тика компонентов (SceneView.onTick сначала зовёт game.tick,
@@ -1026,6 +1295,7 @@ class Game {
     // деревья при загрузке чанка (см. VegetationBatch.commitShadowCache).
     _vegetation?.commitShadowCache();
 
+    _terrainView?.updateAround(trackedPosition);
     final isDriving = gameModeState.mode == ControlMode.driving;
     final viewForward = cameraController.forward;
     pedestrians
@@ -1034,24 +1304,39 @@ class Game {
     final hits = pedestrians.update(
       deltaSeconds,
       trackedPosition,
-      vehiclePosition: isDriving ? vehicle.node.globalTransform.getTranslation() : null,
+      vehiclePosition: isDriving
+          ? vehicle.node.globalTransform.getTranslation()
+          : null,
       vehicleSpeed: isDriving ? vehicle.controller.speed : 0.0,
     );
     wantedSystem.update(
       deltaSeconds,
       pedestrianHits: hits,
-      isSpeeding: isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
+      isSpeeding:
+          isDriving && vehicle.controller.speed >= wantedSystem.speedThreshold,
     );
 
     _firedThisFrame = false;
     _sirenSeconds += deltaSeconds;
     VehicleModels.updateSirens(_sirenSeconds);
+    // A retracted camera must not fill the screen with the player's head.
+    // Separate hide/show thresholds prevent flicker along a wall edge.
+    final playerMesh = _playerMeshNode;
+    if (!isDriving && playerMesh != null) {
+      final arm =
+          (cameraController.eyePosition - cameraController.lookTarget).length;
+      playerMesh.visible = arm > (playerMesh.visible ? 1.35 : 1.65);
+    }
     _updateWeapon(deltaSeconds, isDriving: isDriving);
     _updatePlayerModel(deltaSeconds, isDriving: isDriving);
     _updateWeather(deltaSeconds);
     signals.advance(deltaSeconds);
     _signalsView.update();
-    traffic.update(deltaSeconds, trackedPosition, external: _trafficObstacles(isDriving));
+    traffic.update(
+      deltaSeconds,
+      trackedPosition,
+      external: _trafficObstacles(isDriving),
+    );
     // Проезд на красный — только за рулём; детектор держит "в каком
     // перекрёстке был", поэтому зовётся каждый кадр, а пешком — с нулевой
     // скоростью (не нарушение, но зона перекрёстка обновляется).
@@ -1064,14 +1349,20 @@ class Game {
     final caught = policeSystem.update(
       deltaSeconds,
       trackedPosition,
-      blockers: traffic.carNodes.map((node) => node.globalTransform.getTranslation()),
+      blockers: traffic.carNodes.map(
+        (node) => node.globalTransform.getTranslation(),
+      ),
     );
     if (caught && !isDead) _handleArrest();
     _updateCombat(deltaSeconds, trackedPosition, isDriving: isDriving);
     _updatePickups(deltaSeconds, trackedPosition);
     _updateAudio(deltaSeconds, isDriving: isDriving);
 
-    if (isDriving && !userIsAdjustingCamera) {
+    if (userIsAdjustingCamera) _cameraManualGrace = 1.5;
+    _cameraManualGrace = math.max(0.0, _cameraManualGrace - deltaSeconds);
+    if (isDriving &&
+        _cameraManualGrace == 0.0 &&
+        vehicle.controller.speed > 1.0) {
       _easeCameraYawToward(vehicle.controller.heading, deltaSeconds);
     }
     _keepCameraAboveGround();
@@ -1083,8 +1374,17 @@ class Game {
   void _updateWeather(double deltaSeconds) {
     final params = weather.params;
     _weatherView.updateLightning(deltaSeconds, params);
-    dayNight.update(deltaSeconds, weather: params, lightningFlash: _weatherView.lightningFlash);
-    _weatherView.update(deltaSeconds, dayNight.lighting!, params, cameraNode.globalTransform.getTranslation());
+    dayNight.update(
+      deltaSeconds,
+      weather: params,
+      lightningFlash: _weatherView.lightningFlash,
+    );
+    _weatherView.update(
+      deltaSeconds,
+      dayNight.lighting!,
+      params,
+      cameraNode.globalTransform.getTranslation(),
+    );
     weather.update(
       deltaSeconds,
       gameHoursPassed: deltaSeconds * clock.gameMinutesPerSecond / 60.0,
@@ -1094,18 +1394,31 @@ class Game {
     _wetRoads.update(params.wetness);
     _facades.wetness = params.wetness;
     final lighting = dayNight.lighting!;
-    _neon?.update(deltaSeconds, nightFactor: lighting.nightFactor, goldenHour: lighting.goldenHour);
+    _neon?.update(
+      deltaSeconds,
+      nightFactor: lighting.nightFactor,
+      goldenHour: lighting.goldenHour,
+    );
   }
 
   /// То, перед чем тормозит трафик помимо друг друга: игрок (пешком или
   /// его машина), полиция, пешеходы. Радиусы — полуширины в плане.
   Iterable<TrafficObstacle> _trafficObstacles(bool isDriving) sync* {
     if (isDriving) {
-      yield (position: vehicle.node.globalTransform.getTranslation(), radius: 1.0);
+      yield (
+        position: vehicle.node.globalTransform.getTranslation(),
+        radius: 1.0,
+      );
     } else {
-      yield (position: playerNode.globalTransform.getTranslation(), radius: _playerCapsuleRadius);
+      yield (
+        position: playerNode.globalTransform.getTranslation(),
+        radius: _playerCapsuleRadius,
+      );
       // Пустая машина игрока тоже стоит где-то — возможно, посреди дороги.
-      yield (position: vehicle.node.globalTransform.getTranslation(), radius: 1.0);
+      yield (
+        position: vehicle.node.globalTransform.getTranslation(),
+        radius: 1.0,
+      );
     }
     for (final car in _parkedPlayerCars) {
       yield (position: car.node.globalTransform.getTranslation(), radius: 1.0);
@@ -1127,7 +1440,9 @@ class Game {
   /// "безопасная точка" — отдельного полицейского участка на карте пока
   /// нет). HUD показывает баннер через ArrestState (см. arrest_banner.dart).
   void _updateAudio(double deltaSeconds, {required bool isDriving}) {
-    if (weapon.isReloading && !_wasReloading) audio.reload(playerNode.globalTransform.getTranslation());
+    if (weapon.isReloading && !_wasReloading) {
+      audio.reload(playerNode.globalTransform.getTranslation());
+    }
     _wasReloading = weapon.isReloading;
     final params = weather.params;
     audio.update(
@@ -1153,7 +1468,11 @@ class Game {
   }
 
   /// Полиция стреляет по игроку, здоровье, смерть и возрождение.
-  void _updateCombat(double deltaSeconds, vm.Vector3 trackedPosition, {required bool isDriving}) {
+  void _updateCombat(
+    double deltaSeconds,
+    vm.Vector3 trackedPosition, {
+    required bool isDriving,
+  }) {
     playerHealth.update(deltaSeconds);
     if (isDead) {
       _deathSeconds -= deltaSeconds;
@@ -1161,7 +1480,9 @@ class Game {
       return;
     }
 
-    final speed = isDriving ? vehicle.controller.speed : (_movement?.horizontalSpeed ?? 0.0);
+    final speed = isDriving
+        ? vehicle.controller.speed
+        : (_movement?.horizontalSpeed ?? 0.0);
     final shots = policeSystem.officers.update(
       deltaSeconds,
       trackedPosition,
@@ -1171,18 +1492,31 @@ class Game {
         final delta = to - from;
         final distance = delta.length;
         // Чуть недотягиваем: сама цель (машина игрока) — тоже препятствие.
-        return _bulletRaycast(from, delta / distance, math.max(0.0, distance - 2.5), includePolice: false) == null;
+        return _bulletRaycast(
+              from,
+              delta / distance,
+              math.max(0.0, distance - 2.5),
+              includePolice: false,
+            ) ==
+            null;
       },
       // Путь на уровне колен и груди: низкий забор тоже преграда.
       pathClear: (from, direction, distance) =>
-          _bulletRaycast(from + vm.Vector3(0, 0.5, 0), direction, distance) == null &&
-          _bulletRaycast(from + vm.Vector3(0, 1.2, 0), direction, distance) == null,
+          _bulletRaycast(from + vm.Vector3(0, 0.5, 0), direction, distance) ==
+              null &&
+          _bulletRaycast(from + vm.Vector3(0, 1.2, 0), direction, distance) ==
+              null,
     );
     for (final shot in shots) {
       _weaponEffects.showShot(
         ShotOutcome(
           muzzle: shot.muzzle,
-          bullets: [BulletTrace(shot.end, shot.hit ? BulletImpact.flesh : BulletImpact.none)],
+          bullets: [
+            BulletTrace(
+              shot.end,
+              shot.hit ? BulletImpact.flesh : BulletImpact.none,
+            ),
+          ],
           wounded: 0,
           killed: 0,
           witnesses: 0,
@@ -1213,7 +1547,10 @@ class Game {
   void _respawnAfterDeath() {
     _deathSeconds = 0.0;
     // "Больница" — лечение не бесплатное.
-    wallet.charge(_economy.hospital.amountFor(wallet.balance), TransactionReason.hospital);
+    wallet.charge(
+      _economy.hospital.amountFor(wallet.balance),
+      TransactionReason.hospital,
+    );
     playerHealth.reset();
     wantedState.stars = 0;
     policeSystem.clearUnits();
@@ -1238,7 +1575,9 @@ class Game {
   /// Метки для радара/компаса: дома, полиция, добыча.
   void collectBlips(List<HudBlip> out) {
     for (final property in properties.properties) {
-      final kind = properties.isOwned(property) ? BlipKind.houseOwned : BlipKind.houseForSale;
+      final kind = properties.isOwned(property)
+          ? BlipKind.houseOwned
+          : BlipKind.houseForSale;
       out.add(HudBlip(kind, property.entryPoint.x, property.entryPoint.z));
     }
     for (final car in policeSystem.unitNodes) {
@@ -1249,20 +1588,27 @@ class Game {
       out.add(HudBlip(BlipKind.officer, p.x, p.z));
     }
     for (final item in _pickups.items) {
-      final kind = item.money > 0 ? BlipKind.money : (item.armor > 0 ? BlipKind.armor : BlipKind.ammo);
+      final kind = item.money > 0
+          ? BlipKind.money
+          : (item.armor > 0 ? BlipKind.armor : BlipKind.ammo);
       out.add(HudBlip(kind, item.position.x, item.position.z));
     }
   }
 
   /// Где появляется игрок после смерти и ареста: у своего дома, если он
   /// куплен, иначе на точке спавна.
-  vm.Vector3 get _respawnPosition => properties.respawnPoint() ?? worldConfig.playerSpawnPosition;
+  vm.Vector3 get _respawnPosition =>
+      properties.respawnPoint() ?? worldConfig.playerSpawnPosition;
 
   /// Что можно сделать у входа в дом прямо сейчас (для кнопки в HUD):
   /// только пешком и живым.
   PropertyInteraction? get propertyInteraction {
     if (isDead || gameModeState.mode != ControlMode.onFoot) return null;
-    return properties.interactionAt(playerNode.globalTransform.getTranslation(), wallet, wanted: wantedState.stars > 0);
+    return properties.interactionAt(
+      playerNode.globalTransform.getTranslation(),
+      wallet,
+      wanted: wantedState.stars > 0,
+    );
   }
 
   /// Купить дом, у входа в который стоит игрок. true — куплен.
@@ -1293,7 +1639,10 @@ class Game {
 
   void _handleArrest() {
     audio.busted();
-    wallet.charge(_economy.arrest.amountFor(wallet.balance), TransactionReason.arrestFine);
+    wallet.charge(
+      _economy.arrest.amountFor(wallet.balance),
+      TransactionReason.arrestFine,
+    );
     wantedState.stars = 0;
     policeSystem.clearUnits();
     arrestState.trigger();
@@ -1304,6 +1653,42 @@ class Game {
 
   /// Дистанция камеры за игроком в обычном положении.
   static const double _cameraDistance = 6.0;
+
+  /// Restrict camera rays to chunks along the arm, rather than walking the
+  /// whole scene (including animated people and decorative vegetation).
+  double? _castCameraObstruction(
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double reach,
+  ) {
+    final end = origin + direction * reach;
+    final bounds = vm.Aabb3.minMax(
+      vm.Vector3(
+        math.min(origin.x, end.x) - 0.3,
+        math.min(origin.y, end.y) - 0.3,
+        math.min(origin.z, end.z) - 0.3,
+      ),
+      vm.Vector3(
+        math.max(origin.x, end.x) + 0.3,
+        math.max(origin.y, end.y) + 0.3,
+        math.max(origin.z, end.z) + 0.3,
+      ),
+    );
+    final roots = <Node>[];
+    districtStreamer.collectChunksOverlapping(bounds, roots);
+    double? nearest;
+    for (final root in roots) {
+      final hit = raycastNode(
+        root,
+        vm.Ray.originDirection(origin, direction),
+        maxDistance: nearest ?? reach,
+      );
+      if (hit != null) nearest = hit.distance;
+    }
+    final fence = cityMap.castBarriers(origin, direction, nearest ?? reach);
+    if (fence != null) nearest = fence.distance;
+    return terrain.cast(origin, direction, nearest ?? reach) ?? nearest;
+  }
 
   /// Камера ниже точки взгляда (pitch < 0 — смотрим вверх) ушла бы под
   /// землю: подтягиваем её к персонажу так, чтобы она оставалась хотя бы на
@@ -1316,7 +1701,10 @@ class Game {
       return;
     }
     const clearance = 1.5 - 0.3; // lookHeight минус запас над землёй
-    cameraController.distance = math.min(_cameraDistance, clearance / math.sin(-pitch));
+    cameraController.distance = math.min(
+      _cameraDistance,
+      clearance / math.sin(-pitch),
+    );
   }
 
   /// Плавно доворачивает орбиту камеры к [targetYaw] по кратчайшей дуге —
