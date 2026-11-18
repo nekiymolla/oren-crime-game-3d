@@ -8,6 +8,7 @@ import 'vehicle_damage.dart';
 import 'vehicle_input_bridge_component.dart';
 import 'vehicle_models.dart';
 import 'vehicle_spec.dart';
+import 'vehicle_deformation.dart';
 
 /// Габариты одного силуэта машины — общие для всех архетипов
 /// (см. [VehicleArchetype]), чтобы не дублировать сборку кузова/колёс на
@@ -200,19 +201,9 @@ class VehicleArchetype {
   ];
 }
 
-/// Процедурный плейсхолдер машины — низкий кузов + кабина сверху (сдвиг
-/// кабины и наличие грузового отсека определяются [VehicleDimensions],
-/// см. [VehicleArchetype] для готовых силуэтов) + 4 колеса + фары.
-/// Настоящие 3D-модели — отдельная задача, здесь только геометрия на время
-/// их отсутствия. Разгон/торможение/руление заданы в assets/data/vehicles.json
-/// (car_sedan_01, но код его пока не читает, числа синхронизированы вручную
-/// — см. PROGRESS.md) — здесь только геометрия.
-///
-/// Три визуальных состояния кузова (см. [DamageLevel]) — не настоящая
-/// деформация, а переключение видимости между тремя заранее построенными
-/// preset-узлами (pristine/damaged/wrecked), как и было задумано в
-/// PROGRESS.md (полноценная деформация ждёт rigid-body физики — см. решение
-/// про flutter_scene_rapier там же).
+/// Controllable model, sprung body, local plastic damage and visual severity.
+/// Missing model assets fall back to procedural geometry. Driving profiles
+/// come from vehicles.json by modelId, including cars stolen from traffic.
 class BuiltVehicle {
   BuiltVehicle({
     required this.node,
@@ -225,6 +216,16 @@ class BuiltVehicle {
       damage.registerCollision(impactSpeed);
       _syncVisibility();
     };
+    controller.onImpact = (impact) {
+      final inverse = node.globalTransform.clone()..invert();
+      final p = impact.localPoint ?? inverse.transform3(impact.point.clone());
+      final n =
+          impact.localNormal ??
+          (inverse.transform3(impact.point + impact.normal) - p);
+      final changed = deformation.add(p, n, impact.closingSpeed);
+      final body = _bodyVariants[_visibleLevel];
+      if (changed && body != null) deformation.apply(body, node);
+    };
   }
 
   /// Узел-машина — точка контакта с землёй (как и у игрока), тот же паттерн:
@@ -232,7 +233,22 @@ class BuiltVehicle {
   final Node node;
   final VehicleControllerComponent controller;
   final VehicleDamageState damage;
+  final deformation = VehicleDeformation();
   final Map<DamageLevel, Node> _bodyVariants;
+
+  void inheritDeformation(List<CrushZone> zones) {
+    deformation.zones.addAll([
+      for (final z in zones)
+        CrushZone(z.center.clone(), z.normal.clone(), z.depth),
+    ]);
+    damage.accumulatedImpact = zones.fold<double>(
+      0,
+      (n, z) => n + z.depth / .024,
+    );
+    _syncVisibility();
+    final body = _bodyVariants[_visibleLevel];
+    if (body != null) deformation.apply(body, node);
+  }
 
   DamageLevel? _visibleLevel;
 
@@ -254,9 +270,9 @@ Future<BuiltVehicle> buildPlaceholderSedan() =>
 /// — у остальных типов своих записей ещё нет, они пока decorative-only и
 /// вообще не проезжают через VehicleControllerComponent).
 const fallbackVehicleSpec = VehicleSpec(
-  maxSpeedKmh: 200.0, // было 165 — см. PROGRESS.md
-  acceleration: 5.8, // base handling for unconfigured stolen cars
-  braking: 9.8, // tyre-limited braking
+  maxSpeedKmh: 160,
+  acceleration: 4,
+  braking: 9,
 );
 
 /// Собирает управляемую машину — с контроллером вождения и системой
@@ -271,8 +287,11 @@ Future<BuiltVehicle> buildVehicle(
   String? vehicleId,
   bool attachPlayerInput = true,
 }) async {
+  await loadVehicleCatalog();
   final spec =
-      (vehicleId != null ? await loadVehicleSpec(vehicleId) : null) ??
+      (vehicleId != null
+          ? await loadVehicleSpec(vehicleId)
+          : vehicleSpecForModel(dims.modelId)) ??
       fallbackVehicleSpec;
   return buildVehicleWithSpec(dims, spec, attachPlayerInput: attachPlayerInput);
 }
@@ -304,18 +323,35 @@ BuiltVehicle buildVehicleWithSpec(
 
   final controller = VehicleControllerComponent(
     maxSpeed: spec.maxSpeedMs,
+    reverseMaxSpeed: math.min(8.3, spec.maxSpeedMs * .18),
     acceleration: spec.acceleration,
     braking: spec.braking,
     mass: spec.mass,
     tyreFriction: spec.tyreFriction,
+    maxSteerAngle: spec.maxSteerAngle,
+    steeringResponse: spec.steeringResponse,
+    maxLateralAcceleration: spec.maxLateralAcceleration,
+    frontStiffness: spec.frontStiffness,
+    rearStiffness: spec.rearStiffness,
+    stabilityAssist: spec.stabilityAssist,
+    driveBias: spec.driveBias,
+    rollCompliance: spec.rollCompliance,
+    pitchCompliance: spec.pitchCompliance,
+    suspensionDamping: spec.suspensionDamping,
+    restitution: spec.restitution,
+    collisionFriction: spec.collisionFriction,
     groundPlaneHeight: 0.0,
     wheelBase: dims.wheelbase,
     bodyHalfWidth: dims.bodyWidth / 2,
     bodyHalfLength: dims.bodyLength / 2,
   );
   controller.sprungBody = bodyRoot;
+  controller.suspensionTravel = spec.suspensionTravel;
   final wheelSpin = node.getComponent<WheelSpinComponent>();
-  if (wheelSpin != null) controller.configureWheels(wheelSpin.wheels);
+  if (wheelSpin != null) {
+    controller.wheelBase = wheelSpin.wheelbase;
+    controller.configureWheels(wheelSpin.wheels);
+  }
   node.addComponent(controller);
   if (attachPlayerInput) {
     node.addComponent(VehicleInputBridgeComponent(controller));

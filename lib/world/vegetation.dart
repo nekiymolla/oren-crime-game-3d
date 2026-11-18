@@ -1,3 +1,4 @@
+import '../vehicles/vehicle_sweep.dart';
 import 'dart:math' as math;
 
 import 'package:flutter_scene/scene.dart';
@@ -162,6 +163,44 @@ class VegetationBatch {
   }
 
   /// Trunk-only collision query for walking and the player's vehicle.
+  VehicleSweepHit? sweepVehicleTrunks(
+    vm.Vector3 position,
+    vm.Vector3 displacement,
+    double oldHeading,
+    double newHeading,
+    double halfWidth,
+    double halfLength,
+  ) {
+    VehicleSweepHit? nearest;
+    final reach =
+        math.sqrt(halfWidth * halfWidth + halfLength * halfLength) +
+        displacement.length +
+        1;
+    for (var i = 0; i < _treePositions.length; i++) {
+      final p = _treePositions[i], scale = _treeScales[i];
+      if ((p.x - position.x).abs() > reach ||
+          (p.z - position.z).abs() > reach ||
+          position.y + .5 < p.y ||
+          position.y + .5 > p.y + treeTrunkHeight * scale) {
+        continue;
+      }
+      final hit = sweepVehicleCircle(
+        position: position,
+        displacement: displacement,
+        oldHeading: oldHeading,
+        newHeading: newHeading,
+        halfWidth: halfWidth,
+        halfLength: halfLength,
+        circle: p,
+        radius: treeTrunkRadius * scale,
+      );
+      if (hit != null && (nearest == null || hit.fraction < nearest.fraction)) {
+        nearest = hit;
+      }
+    }
+    return nearest;
+  }
+
   TreeTrunkHit? castTrunks(
     vm.Vector3 origin,
     vm.Vector3 direction,

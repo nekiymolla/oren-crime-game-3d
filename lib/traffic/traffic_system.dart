@@ -4,6 +4,11 @@ import 'package:flutter_scene/scene.dart';
 import 'package:vector_math/vector_math.dart' as vm;
 
 import '../vehicles/vehicle.dart';
+import '../vehicles/vehicle_spec.dart';
+import '../vehicles/vehicle_impact.dart';
+import '../vehicles/vehicle_deformation.dart';
+import '../vehicles/vehicle_sweep.dart';
+import '../player/character_motion.dart';
 import 'traffic_car.dart';
 import 'traffic_signals.dart';
 
@@ -15,6 +20,9 @@ class _TrafficUnit {
 
   /// Силуэт и цвет — чтобы угнанная машина выглядела так же, как ехала.
   final VehicleDimensions look;
+  final impactVelocity = vm.Vector2.zero();
+  double impactSeconds = 0, impactYawRate = 0;
+  final deformation = VehicleDeformation();
 }
 
 /// Машина потока, которую можно угнать (см. [TrafficSystem.stealableNear]).
@@ -84,12 +92,17 @@ class TrafficSystem {
   Iterable<Node> get carNodes => _units.map((unit) => unit.node);
 
   /// Машины трафика как препятствия для других (полиции, пешеходов).
-  Iterable<TrafficObstacle> get obstacles =>
-      _units.map((unit) => (position: unit.car.position, radius: obstacleRadius));
+  Iterable<TrafficObstacle> get obstacles => _units.map(
+    (unit) => (position: unit.car.position, radius: obstacleRadius),
+  );
 
   /// Ближайшая к [position] машина потока не дальше [radius], едущая не
   /// быстрее [maxSpeed] — с ходу на скорости из машины не выдернешь.
-  StealableCar? stealableNear(vm.Vector3 position, {required double radius, required double maxSpeed}) {
+  StealableCar? stealableNear(
+    vm.Vector3 position, {
+    required double radius,
+    required double maxSpeed,
+  }) {
     _TrafficUnit? best;
     var bestSq = radius * radius;
     for (final unit in _units) {
@@ -116,7 +129,11 @@ class TrafficSystem {
   /// Зовётся каждый кадр из Game.tick(). [external] — то, перед чем машины
   /// должны тормозить помимо друг друга: игрок, его машина, полиция,
   /// пешеходы.
-  void update(double dt, vm.Vector3 trackedPosition, {Iterable<TrafficObstacle> external = const []}) {
+  void update(
+    double dt,
+    vm.Vector3 trackedPosition, {
+    Iterable<TrafficObstacle> external = const [],
+  }) {
     // Первый кадр — вся популяция, ближе обычного; дальше — пополнение
     // (после угона) по одной машине за кадр в дальнем кольце.
     final isFirstFrame = !_spawned;
@@ -139,28 +156,141 @@ class TrafficSystem {
     final cars = [for (final unit in _units) unit.car];
     final despawnSq = despawnRadius * despawnRadius;
     for (final unit in _units) {
-      final canDrive = stepTrafficCar(
-        unit.car,
-        network,
-        dt: dt,
-        random: _random,
-        obstacles: externalList,
-        traffic: cars,
-        signals: signals,
-      );
+      final recovering = unit.impactSeconds > 0;
+      if (recovering) _stepImpact(unit, dt);
+      final canDrive =
+          recovering ||
+          stepTrafficCar(
+            unit.car,
+            network,
+            dt: dt,
+            random: _random,
+            obstacles: externalList,
+            traffic: cars,
+            signals: signals,
+          );
 
       final distanceSq = (unit.car.position - trackedPosition).length2;
-      final stuckFarAway = (!canDrive || unit.car.stoppedSeconds > _stuckSeconds) &&
+      final stuckFarAway =
+          (!canDrive || unit.car.stoppedSeconds > _stuckSeconds) &&
           distanceSq > _stuckRespawnDistance * _stuckRespawnDistance;
       if (distanceSq > despawnSq || stuckFarAway) {
-        final fresh = _spawnCar(trackedPosition, respawnMinDistance, respawnMaxDistance);
+        final fresh = _spawnCar(
+          trackedPosition,
+          respawnMinDistance,
+          respawnMaxDistance,
+        );
         if (fresh != null) _replaceCar(unit, fresh);
       }
       _syncNode(unit);
     }
   }
 
+  List<CrushZone> deformationFor(TrafficCar car) {
+    for (final u in _units) {
+      if (identical(u.car, car)) {
+        return [
+          for (final z in u.deformation.zones)
+            CrushZone(z.center.clone(), z.normal.clone(), z.depth),
+        ];
+      }
+    }
+    return [];
+  }
+
+  CharacterRaycaster? impactRaycast;
+  VehicleContactBody? collisionBody(Object? source, vm.Vector3 point) {
+    for (final unit in _units) {
+      if (!identical(source, unit.node)) continue;
+      final mass = vehicleSpecForModel(unit.look.modelId)?.mass ?? 1450;
+      final inertia = mass * unit.look.wheelbase * unit.look.wheelbase * .40;
+      final p = unit.car.position;
+      final velocity = unit.impactSeconds > 0
+          ? unit.impactVelocity.clone()
+          : vm.Vector2(unit.car.forward.x, unit.car.forward.z) * unit.car.speed;
+      return VehicleContactBody(
+        mass: mass,
+        inertia: inertia,
+        velocity: velocity,
+        yawRate: unit.impactYawRate,
+        arm: vm.Vector2(point.x - p.x, point.z - p.z),
+        applyImpulse: (impulse, contact) {
+          if (unit.impactSeconds <= 0) unit.impactVelocity.setFrom(velocity);
+          unit.impactVelocity.add(impulse / mass);
+          final r = vm.Vector2(contact.x - p.x, contact.z - p.z);
+          unit.impactYawRate =
+              ((unit.impactYawRate +
+                      (r.y * impulse.x - r.x * impulse.y) / inertia))
+                  .clamp(-2.5, 2.5);
+          unit.impactSeconds = 1.6;
+          final inverse = unit.node.globalTransform.clone()..invert();
+          final local = inverse.transform3(contact.clone());
+          final n =
+              inverse.transform3(
+                contact + vm.Vector3(impulse.x, 0, impulse.y).normalized(),
+              ) -
+              local;
+          final changed = unit.deformation.add(local, n, impulse.length / mass);
+          final body = unit.node.getChildByName('Body');
+          if (changed && body != null) unit.deformation.apply(body, unit.node);
+        },
+      );
+    }
+    return null;
+  }
+
+  void _stepImpact(_TrafficUnit unit, double dt) {
+    final car = unit.car;
+    var delta =
+        vm.Vector3(unit.impactVelocity.x, 0, unit.impactVelocity.y) * dt;
+    final oldHeading = car.heading,
+        newHeading = oldHeading + unit.impactYawRate * dt;
+    final cast = impactRaycast;
+    var fraction = 1.0;
+    if (cast != null) {
+      final hit = sweepVehicleHull(
+        position: car.position,
+        displacement: delta,
+        oldHeading: oldHeading,
+        newHeading: newHeading,
+        halfWidth: unit.look.bodyWidth / 2,
+        halfLength: unit.look.bodyLength / 2,
+        probeHeight: .5,
+        cast: cast,
+      );
+      if (hit != null) {
+        final spec = vehicleSpecForModel(unit.look.modelId),
+            mass = spec?.mass ?? 1450;
+        final point = hit.point ?? car.position;
+        final response = resolveVehicleImpact(
+          velocity: unit.impactVelocity,
+          yawRate: unit.impactYawRate,
+          mass: mass,
+          inertia: mass * unit.look.wheelbase * unit.look.wheelbase * .40,
+          arm: vm.Vector2(point.x - car.position.x, point.z - car.position.z),
+          normal: vm.Vector2(hit.normal.x, hit.normal.z),
+        );
+        unit.impactVelocity.setFrom(response.velocity);
+        unit.impactYawRate = response.yawRate;
+        delta *= hit.fraction;
+        fraction = hit.fraction;
+      }
+    }
+    car.position += delta;
+    car.heading = oldHeading + (newHeading - oldHeading) * fraction;
+    unit.impactVelocity.scale(math.exp(-1.4 * dt));
+    unit.impactYawRate *= math.exp(-3 * dt);
+    unit.impactSeconds = math.max(0, unit.impactSeconds - dt);
+    car.speed = math.max(
+      0,
+      unit.impactVelocity.dot(vm.Vector2(car.forward.x, car.forward.z)),
+    );
+  }
+
   void _replaceCar(_TrafficUnit unit, TrafficCar fresh) {
+    unit.impactSeconds = 0;
+    unit.impactVelocity.setZero();
+    unit.impactYawRate = 0;
     unit.car
       ..position = fresh.position
       ..heading = fresh.heading
@@ -177,7 +307,10 @@ class TrafficSystem {
   void _syncNode(_TrafficUnit unit) {
     unit.node
       ..position = unit.car.position
-      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), unit.car.heading);
+      ..rotation = vm.Quaternion.axisAngle(
+        vm.Vector3(0, 1, 0),
+        unit.car.heading,
+      );
   }
 
   VehicleDimensions _randomLook() {
@@ -189,13 +322,19 @@ class TrafficSystem {
   /// Машина в начале случайного ребра трафика, начало которого в кольце
   /// [minDistance]..[maxDistance] от игрока и не ближе [_spawnSpacing] к
   /// другим машинам. null — подходящих мест нет.
-  TrafficCar? _spawnCar(vm.Vector3 center, double minDistance, double maxDistance) {
+  TrafficCar? _spawnCar(
+    vm.Vector3 center,
+    double minDistance,
+    double maxDistance,
+  ) {
     final candidates = <String>[];
     for (final entry in network.adjacency.entries) {
       final node = network.graph.nodes[entry.key];
       if (node == null || entry.value.isEmpty) continue;
       final distance = (node.toVector3() - center).length;
-      if (distance >= minDistance && distance <= maxDistance) candidates.add(entry.key);
+      if (distance >= minDistance && distance <= maxDistance) {
+        candidates.add(entry.key);
+      }
     }
     for (var attempt = 0; attempt < 12 && candidates.isNotEmpty; attempt++) {
       final fromId = candidates[_random.nextInt(candidates.length)];
@@ -208,7 +347,9 @@ class TrafficSystem {
       direction.normalize();
       final position = network.laneStart(fromId, toId);
       final crowded = _units.any(
-        (unit) => (unit.car.position - position).length2 < _spawnSpacing * _spawnSpacing,
+        (unit) =>
+            (unit.car.position - position).length2 <
+            _spawnSpacing * _spawnSpacing,
       );
       if (crowded) continue;
       return TrafficCar(

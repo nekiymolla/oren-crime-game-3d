@@ -107,8 +107,8 @@ class VehicleModels {
     ..occlusionTexture = source.occlusionTexture
     ..doubleSided = source.doubleSided
     ..baseColorFactor = level == DamageLevel.wrecked
-        ? vm.Vector4(0.08, 0.08, 0.08, 1)
-        : vm.Vector4(0.6, 0.6, 0.6, 1)
+        ? vm.Vector4(0.72, 0.72, 0.72, 1)
+        : vm.Vector4(0.94, 0.94, 0.94, 1)
     ..metallicFactor = level == DamageLevel.wrecked
         ? 0.05
         : source.metallicFactor
@@ -122,12 +122,17 @@ class VehicleModels {
     final base = switch (level) {
       DamageLevel.pristine => color,
       DamageLevel.damaged => vm.Vector4(
-        color.x * 0.6,
-        color.y * 0.6,
-        color.z * 0.6,
+        color.x * 0.94,
+        color.y * 0.94,
+        color.z * 0.94,
         1.0,
       ),
-      DamageLevel.wrecked => vm.Vector4(0.05, 0.05, 0.05, 1.0),
+      DamageLevel.wrecked => vm.Vector4(
+        color.x * .72,
+        color.y * .72,
+        color.z * .72,
+        1,
+      ),
     };
     return PhysicallyBasedMaterial()
       ..baseColorFactor = base

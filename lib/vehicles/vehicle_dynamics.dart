@@ -26,6 +26,13 @@ class VehicleDynamics {
     required double braking,
     required double drag,
     double tyreFriction = 1.0,
+    double frontStiffness = 40,
+    double rearStiffness = 58,
+    double stabilityAssist = 1.2,
+    double driveBias = .35,
+    double rollCompliance = .009,
+    double pitchCompliance = .007,
+    double suspensionDamping = 11,
   }) {
     final forward = vm.Vector2(math.sin(heading), math.cos(heading));
     final right = vm.Vector2(forward.y, -forward.x);
@@ -85,34 +92,46 @@ class VehicleDynamics {
     }
 
     // Longitudinal braking also consumes grip (a friction circle).
-    final gripFraction = math.sqrt(
-      math.max(
-        .12,
-        1 -
-            math.pow(
-              (longitudinalAcceleration.abs() / (9.81 * tyreFriction)).clamp(
-                0.0,
-                .95,
-              ),
-              2,
-            ),
-      ),
-    );
+    final brakingGrip = longitudinalAcceleration * longitudinal < 0;
+    final frontDrive = brakingGrip ? frontShare : driveBias;
+    double remainingGrip(double axleLoad, double share) {
+      final demand =
+          (mass *
+                  longitudinalAcceleration.abs() *
+                  share /
+                  math.max(1, axleLoad))
+              .clamp(0.0, .98);
+      return math.sqrt(math.max(.08, 1 - demand * demand));
+    }
+
+    final frontFraction = remainingGrip(frontGrip, frontDrive);
+    final rearFraction = remainingGrip(rearGrip, 1 - frontDrive);
     final frontForce = tyreForce(
       slipFront,
-      frontGrip * gripFraction,
-      mass * 43,
+      frontGrip * frontFraction,
+      mass * frontStiffness,
     );
-    final rearForce = tyreForce(slipRear, rearGrip * gripFraction, mass * 47);
+    final rearForce = tyreForce(
+      slipRear,
+      rearGrip * rearFraction,
+      mass * rearStiffness,
+    );
     final frontLateral = frontForce * math.cos(steering);
     final ay = (frontLateral + rearForce) / mass;
     longitudinal -= frontForce * math.sin(steering) / mass * dt;
-    final inertia = mass * wheelbase * wheelbase * .33;
+    final inertia = mass * wheelbase * wheelbase * .40;
     final dynamicYaw =
         yawRate + (a * frontLateral - b * rearForce) / inertia * dt;
     final parkingYaw = longitudinal / wheelbase * math.tan(steering);
     yawRate = parkingYaw * (1 - dynamicBlend) + dynamicYaw * dynamicBlend;
     if (speed < .08) yawRate = 0;
+    if (!handbrake && speed > 5) {
+      final goal = (longitudinal / wheelbase * math.tan(steering)).clamp(
+        -9.81 * tyreFriction / math.max(speed, 1),
+        9.81 * tyreFriction / math.max(speed, 1),
+      );
+      yawRate += (goal - yawRate) * (1 - math.exp(-stabilityAssist * dt));
+    }
     heading += yawRate * dt;
     lateral += ay * dt;
     final newForward = vm.Vector2(math.sin(heading), math.cos(heading));
@@ -125,14 +144,27 @@ class VehicleDynamics {
     );
     lateralAcceleration = speed < 5 ? yawRate * longitudinal : ay;
 
-    final targetPitch = (-longitudinalAcceleration * .008).clamp(-.09, .09);
-    final targetRoll = (lateralAcceleration * .012).clamp(-.12, .12);
+    final targetPitch = (-longitudinalAcceleration * pitchCompliance).clamp(
+      -.09,
+      .09,
+    );
+    final targetRoll = (lateralAcceleration * rollCompliance).clamp(-.12, .12);
     _pitchVelocity +=
-        (48 * (targetPitch - bodyPitch) - 10 * _pitchVelocity) * dt;
-    _rollVelocity += (42 * (targetRoll - bodyRoll) - 9 * _rollVelocity) * dt;
+        (48 * (targetPitch - bodyPitch) - suspensionDamping * _pitchVelocity) *
+        dt;
+    _rollVelocity +=
+        (42 * (targetRoll - bodyRoll) - suspensionDamping * _rollVelocity) * dt;
     bodyPitch += _pitchVelocity * dt;
     bodyRoll += _rollVelocity * dt;
     return heading;
+  }
+
+  void kickImpact(double lateralDelta, double longitudinalDelta) {
+    _pitchVelocity = (_pitchVelocity + longitudinalDelta * .035).clamp(
+      -1.2,
+      1.2,
+    );
+    _rollVelocity = (_rollVelocity - lateralDelta * .035).clamp(-1.2, 1.2);
   }
 
   void stopYaw() {

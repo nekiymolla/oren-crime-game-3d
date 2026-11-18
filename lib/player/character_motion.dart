@@ -6,8 +6,13 @@ import 'package:vector_math/vector_math.dart' as vm;
 /// дистанция вдоль луча и мировая нормаль поверхности (единичная, развёрнутая
 /// к началу луча — ровно так её отдаёт `raycastNode`, см. SceneRaycastHit).
 class CharacterRayHit {
-  const CharacterRayHit({required this.distance, required this.normal});
+  const CharacterRayHit({
+    required this.distance,
+    required this.normal,
+    this.collider,
+  });
 
+  final Object? collider;
   final double distance;
   final vm.Vector3 normal;
 }

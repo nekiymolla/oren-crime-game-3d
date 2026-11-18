@@ -45,6 +45,7 @@ import '../police/wanted_system.dart';
 import '../vehicles/vehicle.dart';
 import '../vehicles/vehicle_models.dart';
 import '../vehicles/vehicle_spec.dart';
+import '../vehicles/vehicle_controller_component.dart';
 import '../weapons/player_shooting.dart';
 import '../weapons/weapon_config.dart';
 import '../weapons/weapon_effects_view.dart';
@@ -508,35 +509,30 @@ class Game {
         worldConfig.playerSpawnPosition + vm.Vector3(4, 0, 0);
     scene.add(vehicle.node);
 
-    // Пара припаркованных машин для разнообразия ("больше машин", см.
-    // PROGRESS.md) — чисто декоративные (buildStaticVehicleVisual, без
-    // VehicleControllerComponent/повреждений), трафик-AI отдельная задача.
-    final parkedHatchback = buildStaticVehicleVisual(VehicleArchetype.hatchback)
-      ..position = worldConfig.playerSpawnPosition + vm.Vector3(-6, 0, -3)
-      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), math.pi * 0.15);
-    final parkedPickup = buildStaticVehicleVisual(VehicleArchetype.suv)
-      ..position = worldConfig.playerSpawnPosition + vm.Vector3(-8, 0, 6)
-      ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), -math.pi * 0.4);
-    if (cityMap.parking.length >= 2) {
-      parkedHatchback.position = cityMap.parking[0].position;
-      parkedHatchback.rotation = vm.Quaternion.axisAngle(
+    // Two accessible parked cars offer a slow agile compact and a heavy SUV.
+    final parked = [
+      await buildVehicle(VehicleArchetype.hatchback),
+      await buildVehicle(VehicleArchetype.suv),
+    ];
+    for (var i = 0; i < parked.length; i++) {
+      final car = parked[i];
+      car.node.position = cityMap.parking.length > i
+          ? cityMap.parking[i].position
+          : worldConfig.playerSpawnPosition + vm.Vector3(-6.0 - i * 3, 0, 6);
+      car.controller.heading = cityMap.parking.length > i
+          ? cityMap.parking[i].yaw
+          : 0;
+      car.node.rotation = vm.Quaternion.axisAngle(
         vm.Vector3(0, 1, 0),
-        cityMap.parking[0].yaw,
+        car.controller.heading,
       );
-      parkedPickup.position = cityMap.parking[1].position;
-      parkedPickup.rotation = vm.Quaternion.axisAngle(
-        vm.Vector3(0, 1, 0),
-        cityMap.parking[1].yaw,
-      );
+      car.controller.groundHeightAt = terrain.heightAt;
+      scene.add(car.node);
+      _parkedPlayerCars.add(car);
     }
-    scene.add(parkedHatchback);
-    scene.add(parkedPickup);
-
-    // Машины — не часть чанков района, поэтому в коллизионную область они
-    // добавляются отдельными корнями (и только когда игрок рядом, иначе
-    // каждый луч обходил бы их поддеревья впустую). Патрульные машины
-    // приходят колбэком: их набор меняется по звёздам розыска.
-    _decorCars.addAll([parkedHatchback, parkedPickup]);
+    for (final car in [vehicle, ...parked]) {
+      _hookCrashSound(car);
+    }
     collisionField.addColliderSource(
       () => [
         vehicle.node,
@@ -850,13 +846,18 @@ class Game {
   /// того же вида, водитель выскакивает и убегает, розыск — звезда.
   void _carjack(StealableCar stolen) {
     final car = stolen.car;
+    final dents = traffic.deformationFor(car);
     traffic.removeCar(car);
 
-    final built = buildVehicleWithSpec(stolen.look, _stolenCarSpec);
+    final built = buildVehicleWithSpec(
+      stolen.look,
+      vehicleSpecForModel(stolen.look.modelId) ?? _stolenCarSpec,
+    );
     built.node
       ..position = car.position
       ..rotation = vm.Quaternion.axisAngle(vm.Vector3(0, 1, 0), car.heading);
     built.controller.heading = car.heading;
+    built.inheritDeformation(dents);
     scene.add(built.node);
 
     _parkPlayerCar(vehicle);
@@ -870,12 +871,48 @@ class Game {
     wantedSystem.reportMinorCrime();
   }
 
+  CharacterRayHit? _staticVehicleRaycast(
+    vm.Vector3 origin,
+    vm.Vector3 direction,
+    double reach,
+  ) {
+    final end = origin + direction * reach;
+    final box = vm.Aabb3.minMax(
+      vm.Vector3(
+        math.min(origin.x, end.x),
+        math.min(origin.y, end.y),
+        math.min(origin.z, end.z),
+      ),
+      vm.Vector3(
+        math.max(origin.x, end.x),
+        math.max(origin.y, end.y),
+        math.max(origin.z, end.z),
+      ),
+    );
+    final roots = <Node>[];
+    districtStreamer.collectChunksOverlapping(box, roots);
+    CharacterRayHit? nearest;
+    for (final root in roots) {
+      final hit = districtStreamer.castRoot(
+        root,
+        origin,
+        direction,
+        nearest?.distance ?? reach,
+      );
+      if (hit != null) nearest = hit;
+    }
+    return cityMap.castBarriers(
+          origin,
+          direction,
+          nearest?.distance ?? reach,
+        ) ??
+        nearest;
+  }
+
   /// Стволы и звук удара для машины игрока — поверх обработчика повреждений.
   void _hookCrashSound(BuiltVehicle car) {
-    car.controller.additionalObstacleSweep =
-        (origin, direction, distance, radius) => _vegetation
-            ?.castTrunks(origin, direction, distance, sweepRadius: radius)
-            ?.distance;
+    car.controller.extraHullSweep = (p, d, a, b, w, l) =>
+        _vegetation?.sweepVehicleTrunks(p, d, a, b, w, l);
     if (!_crashHooked.add(car)) return;
     final field = CharacterCollisionField(
       districtStreamer: districtStreamer,
@@ -894,6 +931,16 @@ class Game {
         ...traffic.carNodes,
       ],
     );
+    car.controller.contactBody = (source, point) {
+      if (source is Node) {
+        final controller = source.getComponent<VehicleControllerComponent>();
+        if (controller != null && !identical(controller, car.controller)) {
+          return controller.collisionBody(point);
+        }
+      }
+      return traffic.collisionBody(source, point);
+    };
+    traffic.impactRaycast = _staticVehicleRaycast;
     car.controller
       ..groundHeightAt = terrain.heightAt
       ..obstacleRaycast = field.cast

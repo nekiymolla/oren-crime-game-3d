@@ -29,7 +29,8 @@ void main() {
       car.fixedUpdate(1 / 60);
       expect(prepared, 1);
       expect(casts, greaterThanOrEqualTo(4));
-      expect(car.velocityXZ.x.abs(), lessThan(.001));
+      expect(car.velocityXZ.x, lessThan(0));
+      expect(car.velocityXZ.x.abs(), lessThan(1));
       expect(car.velocityXZ.y, greaterThan(10));
       expect(impact, lessThan(8));
     },

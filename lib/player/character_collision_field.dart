@@ -115,7 +115,11 @@ class CharacterCollisionField {
         nearest?.distance ?? maxDistance,
       );
       if (hit != null && (nearest == null || hit.distance < nearest.distance)) {
-        nearest = hit;
+        nearest = CharacterRayHit(
+          distance: hit.distance,
+          normal: hit.normal,
+          collider: root,
+        );
       }
     }
     final additional = additionalRaycast?.call(
@@ -125,7 +129,7 @@ class CharacterCollisionField {
     );
     if (additional != null) return additional;
     if (nearest == null) return null;
-    return CharacterRayHit(distance: nearest.distance, normal: nearest.normal);
+    return nearest;
   }
 }
 

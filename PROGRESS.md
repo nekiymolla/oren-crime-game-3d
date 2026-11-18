@@ -1896,3 +1896,16 @@ in daylight and an entrance lamp at 23:00; facade shader reports no failure.
   acceleration/braking, cornering, handbrake and walls) pass. Night scene/HUD
   visually inspected. Sound defaults OFF. IDE macOS launch defaults to profile;
   debug remains available separately. No claims for untested devices/scenarios.
+2026-11-19 — vehicle handling and impact pass:
+- Eight model-specific handling profiles; calmer speed-dependent steering,
+  per-axle traction and configurable suspension/body response.
+- Mass/contact-point impulses replace fixed collision speed loss. Parked
+  cars and traffic receive motion, rotation and local damage on impact.
+- Local mesh dents and scratches, bounded deformation work across frames;
+  original shared meshes remain intact. Accurate box/trunk sweeps remove
+  premature tree collisions.
+- 270 tests pass. Native macOS/Metal vehicle smoke verifies actual vertex
+  deformation, wall rebound and two-car momentum transfer. Full gameplay
+  smoke passes including terrain, wheels, trees, steering and handbrake.
+- Analyzer has three existing infos. No new FPS measurement in this pass.
+  Scope and reproducible checks: docs/VEHICLES.md.

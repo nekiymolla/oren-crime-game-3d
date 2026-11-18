@@ -1,6 +1,5 @@
-/// Уровень визуальных повреждений — переключение между preset-мешами
-/// (см. vehicle.dart), не настоящая деформация кузова: та ждёт rigid-body
-/// физики (см. заметку про flutter_scene_rapier в PROGRESS.md).
+/// Overall glass/paint severity. Local plastic dents are stored separately
+/// in VehicleDeformation; a collision does not turn the car into a burnt shell.
 enum DamageLevel { pristine, damaged, wrecked }
 
 /// Чистая (без Flutter/flutter_scene) логика накопления повреждений —
@@ -8,7 +7,10 @@ enum DamageLevel { pristine, damaged, wrecked }
 /// скорость машины в момент остановки о препятствие (см. его `onCollision`)
 /// через [registerCollision]; здесь это превращается в уровень повреждений.
 class VehicleDamageState {
-  VehicleDamageState({this.damagedThreshold = 12.0, this.wreckedThreshold = 30.0});
+  VehicleDamageState({
+    this.damagedThreshold = 12.0,
+    this.wreckedThreshold = 30.0,
+  });
 
   /// Накопленный "урон" — грубо говоря, сумма скоростей всех ударов
   /// (м/с), не физически точная величина, просто монотонный счётчик.

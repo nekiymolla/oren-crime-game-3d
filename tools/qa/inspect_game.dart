@@ -242,6 +242,104 @@ Future<void> main(List<String> args) async {
       }
       return;
     }
+    if (args[1] == '--vehicle-smoke') {
+      final hud = await instance('ui/hud/game_hud.dart', '_GameHudState');
+      void check(bool ok, String message) {
+        if (!ok) throw StateError('FAIL: $message');
+        print('PASS: $message');
+      }
+
+      final deadline = DateTime.now().add(const Duration(seconds: 45));
+      while (await eval('_ready', hud) != 'true') {
+        if (DateTime.now().isAfter(deadline)) {
+          throw StateError('Scene load timed out');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 200));
+      }
+      Future<void> run(String code, {int wait = 200}) async {
+        await eval('Future.microtask(() {$code})');
+        await Future<void>.delayed(Duration(milliseconds: wait));
+      }
+
+      final original = await eval(
+        r'"${vehicle.node.position.x},${vehicle.node.position.y},${vehicle.node.position.z}"',
+      );
+      final targetPosition = await eval(
+        r'"${_parkedPlayerCars.first.node.position.x},${_parkedPlayerCars.first.node.position.y},${_parkedPlayerCars.first.node.position.z}"',
+      );
+      final hours = await eval('clock.hours'),
+          rate = await eval('clock.gameMinutesPerSecond');
+      await eval('Future.microtask(()=>_setPaused(false))', hud);
+      try {
+        await run(
+          'inputState.reset(); wantedState.stars=0; clock.hours=13; clock.gameMinutesPerSecond=0; playerHealth.health=100; _hookCrashSound(vehicle); gameModeState.mode=ControlMode.driving; gameModeState.activeVehicle=vehicle.controller; _playerMeshNode!.visible=false; cameraController.followTarget=vehicle.node;',
+        );
+        await eval('Future.microtask(()=>setState((){}))', hud);
+        check(
+          await eval('vehicle.controller.maxSpeed') !=
+              await eval('_parkedPlayerCars.first.controller.maxSpeed'),
+          'parked compact and starter sedan have different profiles',
+        );
+        await run(
+          'final p=cityMap.facadeProfiles.first; final normal=vm.Vector3(p.entrance.z,0,p.entrance.w); vehicle.node.position=vm.Vector3(p.entrance.x,0,p.entrance.y)+normal*8; vehicle.controller.heading=math.atan2(-normal.x,-normal.z); vehicle.controller.dynamics.stopYaw(); vehicle.controller.velocityXZ.setZero(); cameraController.orbitBy(vehicle.controller.heading-cameraController.yaw,.22-cameraController.pitch);',
+        );
+        await run(
+          'final p=cityMap.facadeProfiles.first; vehicle.controller.velocityXZ.setValues(-p.entrance.z*10,-p.entrance.w*10);',
+          wait: 1100,
+        );
+        check(
+          double.parse(await eval('vehicle.damage.accumulatedImpact')) > 2.5,
+          'real mapped wall records an impact',
+        );
+        check(
+          int.parse(await eval('vehicle.deformation.zones.length')) > 0,
+          'impact creates a local dent',
+        );
+        print(
+          'INFO: wall rebound speed=${await eval('vehicle.controller.speed')}',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        check(
+          double.parse(await eval('vehicle.deformation.maxDisplacement')) >
+              .025,
+          'impact deforms actual vertices, not only paint',
+        );
+        await run(
+          'inputState.reset(); wantedState.stars=0; final c=_parkedPlayerCars.first; vehicle.node.position=vm.Vector3(900,0,900);vehicle.controller.heading=0;vehicle.controller.dynamics.stopYaw();vehicle.controller.velocityXZ.setZero(); c.node.position=vm.Vector3(900,0,910);c.controller.heading=0;c.controller.velocityXZ.setZero();c.controller.dynamics.stopYaw();cameraController.orbitBy(-cameraController.yaw,.22-cameraController.pitch);',
+          wait: 700,
+        );
+        await run('vehicle.controller.velocityXZ.setValues(0,12);', wait: 1000);
+        final targetMoved =
+            double.parse(
+              await eval('_parkedPlayerCars.first.node.position.z'),
+            ) -
+            910;
+        check(
+          targetMoved > .2,
+          'rear impact pushes the other car: ${targetMoved.toStringAsFixed(2)}m',
+        );
+        check(
+          double.parse(await eval('vehicle.controller.speed')) > 1,
+          'striking car retains motion after a two-body collision',
+        );
+        check(
+          int.parse(
+                await eval('_parkedPlayerCars.first.deformation.zones.length'),
+              ) >
+              0,
+          'struck car receives visible damage',
+        );
+        print(
+          'INFO: two-car speeds ${await eval('vehicle.controller.speed')} / ${await eval('_parkedPlayerCars.first.controller.speed')}',
+        );
+      } finally {
+        await run(
+          'inputState.reset(); wantedState.stars=0; vehicle.controller.velocityXZ.setZero();vehicle.controller.dynamics.stopYaw();vehicle.node.position=vm.Vector3($original);final c=_parkedPlayerCars.first;c.controller.velocityXZ.setZero();c.controller.dynamics.stopYaw();c.node.position=vm.Vector3($targetPosition);clock.hours=$hours;clock.gameMinutesPerSecond=$rate;gameModeState.mode=ControlMode.onFoot;_playerMeshNode!.visible=true;cameraController.followTarget=playerNode;',
+        );
+        await eval('Future.microtask(()=>setState((){}))', hud);
+      }
+      return;
+    }
     if (args[1] == '--areas-smoke') {
       void check(bool ok, String label) {
         if (!ok) throw StateError('FAIL: $label');
@@ -874,11 +972,11 @@ Future<void> main(List<String> args) async {
       final expectedClearance =
           double.parse(
             await eval(
-              'vehicle.controller.bodyHalfLength + vehicle.controller.bodyHalfWidth',
+              'vehicle.controller.bodyHalfLength',
             ),
           ) +
           0.28 * tree[3] +
-          0.05;
+          0.005;
       check(
         (carClearance - expectedClearance).abs() < 0.16 &&
             double.parse(await eval('vehicle.controller.speed')) < 0.2,

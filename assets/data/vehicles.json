@@ -5,10 +5,62 @@
       "displayName": "Седан 80-х",
       "modelClass": "sedan",
       "modelAsset": "assets/models/vehicles/sedan_80.glb",
-      "mass": 1450.0,
-      "maxSpeedKmh": 200.0,
-      "acceleration": 5.2,
-      "braking": 9.6,
+      "mass": 1350,
+      "maxSpeedKmh": 160,
+      "acceleration": 4.0,
+      "braking": 8.5,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.22
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 1.02
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "sedan_80",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 4.0,
+        "maxLateralAcceleration": 5.7,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.3,
+        "driveBias": 0.05,
+        "rollCompliance": 0.012,
+        "pitchCompliance": 0.009,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
+    },
+    {
+      "id": "car_sedan_modern",
+      "displayName": "Городской седан",
+      "modelClass": "sedan",
+      "modelAsset": "assets/models/vehicles/sedan.glb",
+      "mass": 1450,
+      "maxSpeedKmh": 185,
+      "acceleration": 4.8,
+      "braking": 9.4,
       "engine": {
         "maxTorqueNm": 220.0,
         "maxRpm": 6500.0,
@@ -28,26 +80,41 @@
       "wheels": {
         "radius": 0.33,
         "width": 0.22,
-        "gripFriction": 1.1
+        "gripFriction": 1.07
       },
       "fuelCapacityLiters": 55.0,
       "fuelConsumptionPer100km": 9.5,
       "doors": 4,
       "headlights": true,
       "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
-      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg"
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "sedan",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 4.5,
+        "maxLateralAcceleration": 6.4,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.5,
+        "driveBias": 0.8,
+        "rollCompliance": 0.009,
+        "pitchCompliance": 0.006,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
     },
     {
-      "id": "car_police_01",
-      "displayName": "Патрульная машина",
-      "modelClass": "sedan",
-      "modelAsset": "assets/models/vehicles/car_police_01.glb",
-      "mass": 1500.0,
-      "maxSpeedKmh": 190.0,
-      "acceleration": 5.8,
-      "braking": 10.0,
+      "id": "car_hatchback_01",
+      "displayName": "Городской компакт",
+      "modelClass": "hatchback",
+      "modelAsset": "assets/models/vehicles/hatchback.glb",
+      "mass": 1080,
+      "maxSpeedKmh": 138,
+      "acceleration": 3.5,
+      "braking": 9.2,
       "engine": {
-        "maxTorqueNm": 210.0,
+        "maxTorqueNm": 220.0,
         "maxRpm": 6500.0,
         "gearRatios": [
           3.5,
@@ -60,7 +127,7 @@
       "suspension": {
         "stiffness": 35000.0,
         "damping": 4500.0,
-        "travel": 0.18
+        "travel": 0.16
       },
       "wheels": {
         "radius": 0.33,
@@ -68,11 +135,286 @@
         "gripFriction": 1.1
       },
       "fuelCapacityLiters": 55.0,
-      "fuelConsumptionPer100km": 10.5,
+      "fuelConsumptionPer100km": 9.5,
       "doors": 4,
       "headlights": true,
       "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
-      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg"
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "hatchback",
+      "handling": {
+        "maxSteerAngle": 0.56,
+        "steeringResponse": 5.0,
+        "maxLateralAcceleration": 7.1,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.8,
+        "driveBias": 1.0,
+        "rollCompliance": 0.008,
+        "pitchCompliance": 0.006,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
+    },
+    {
+      "id": "car_suv_01",
+      "displayName": "Тяжёлый внедорожник",
+      "modelClass": "suv",
+      "modelAsset": "assets/models/vehicles/suv.glb",
+      "mass": 2100,
+      "maxSpeedKmh": 155,
+      "acceleration": 3.8,
+      "braking": 8.1,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.26
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 0.98
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "suv",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 3.2,
+        "maxLateralAcceleration": 5.0,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.5,
+        "driveBias": 0.5,
+        "rollCompliance": 0.017,
+        "pitchCompliance": 0.009,
+        "suspensionDamping": 10,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
+    },
+    {
+      "id": "car_sports_01",
+      "displayName": "Спорткупе",
+      "modelClass": "sports",
+      "modelAsset": "assets/models/vehicles/sports.glb",
+      "mass": 1380,
+      "maxSpeedKmh": 235,
+      "acceleration": 6.8,
+      "braking": 11.2,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.11
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 1.2
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "sports",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 4.6,
+        "maxLateralAcceleration": 8.4,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.4,
+        "driveBias": 0.2,
+        "rollCompliance": 0.006,
+        "pitchCompliance": 0.006,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
+    },
+    {
+      "id": "car_sports_02",
+      "displayName": "Мощное купе",
+      "modelClass": "sports",
+      "modelAsset": "assets/models/vehicles/sports2.glb",
+      "mass": 1650,
+      "maxSpeedKmh": 275,
+      "acceleration": 8.0,
+      "braking": 9.8,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.15
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 0.98
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "sports2",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 3.6,
+        "maxLateralAcceleration": 5.9,
+        "frontStiffness": 40,
+        "rearStiffness": 49,
+        "stabilityAssist": 0.65,
+        "driveBias": 0.0,
+        "rollCompliance": 0.009,
+        "pitchCompliance": 0.006,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
+    },
+    {
+      "id": "car_taxi_01",
+      "displayName": "Такси",
+      "modelClass": "sedan",
+      "modelAsset": "assets/models/vehicles/taxi.glb",
+      "mass": 1520,
+      "maxSpeedKmh": 165,
+      "acceleration": 4.1,
+      "braking": 9.0,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.2
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 1.05
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "taxi",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 4.3,
+        "maxLateralAcceleration": 6.3,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.7,
+        "driveBias": 1.0,
+        "rollCompliance": 0.011,
+        "pitchCompliance": 0.006,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
+    },
+    {
+      "id": "car_police_01",
+      "displayName": "Патрульная машина",
+      "modelClass": "sedan",
+      "modelAsset": "assets/models/vehicles/police.glb",
+      "mass": 1570,
+      "maxSpeedKmh": 205,
+      "acceleration": 5.8,
+      "braking": 10.5,
+      "engine": {
+        "maxTorqueNm": 220.0,
+        "maxRpm": 6500.0,
+        "gearRatios": [
+          3.5,
+          2.1,
+          1.4,
+          1.0,
+          0.8
+        ]
+      },
+      "suspension": {
+        "stiffness": 35000.0,
+        "damping": 4500.0,
+        "travel": 0.17
+      },
+      "wheels": {
+        "radius": 0.33,
+        "width": 0.22,
+        "gripFriction": 1.12
+      },
+      "fuelCapacityLiters": 55.0,
+      "fuelConsumptionPer100km": 9.5,
+      "doors": 4,
+      "headlights": true,
+      "hornSoundAsset": "assets/audio/vehicles/horn_sedan_01.ogg",
+      "engineSoundAsset": "assets/audio/vehicles/engine_sedan_01.ogg",
+      "modelId": "police",
+      "handling": {
+        "maxSteerAngle": 0.5,
+        "steeringResponse": 4.4,
+        "maxLateralAcceleration": 7.4,
+        "frontStiffness": 40,
+        "rearStiffness": 62,
+        "stabilityAssist": 1.8,
+        "driveBias": 0.5,
+        "rollCompliance": 0.008,
+        "pitchCompliance": 0.006,
+        "suspensionDamping": 12,
+        "restitution": 0.12,
+        "collisionFriction": 0.26
+      }
     }
   ]
 }

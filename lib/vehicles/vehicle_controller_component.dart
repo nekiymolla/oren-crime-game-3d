@@ -8,10 +8,11 @@ import '../player/character_motion.dart'
 import 'vehicle_dynamics.dart';
 import 'wheel_contact.dart';
 import 'vehicle_sweep.dart';
+import 'vehicle_impact.dart';
 
 /// Two-axle tyre forces and yaw inertia, terrain contact and sprung body.
-/// This is a planar handling model with swept collision probes; it does
-/// not simulate a full 3D rigid body, airborne suspension or deformation.
+/// This is a planar handling model with swept collision probes; it uses
+/// rigid impact impulses and visual plastic dents, not full 3D airborne physics.
 class VehicleControllerComponent extends Component {
   VehicleControllerComponent({
     required this.maxSpeed,
@@ -21,12 +22,20 @@ class VehicleControllerComponent extends Component {
     this.drag = 0.32,
     this.mass = 1450,
     this.tyreFriction = 1.0,
-    this.maxSteerAngle = 0.55,
+    this.maxSteerAngle = 0.52,
+    this.steeringResponse = 4,
+    this.maxLateralAcceleration = 6.2,
+    this.frontStiffness = 40,
+    this.rearStiffness = 58,
+    this.stabilityAssist = 1.2,
+    this.driveBias = .35,
+    this.rollCompliance = .009,
+    this.pitchCompliance = .007,
+    this.suspensionDamping = 11,
+    this.restitution = .12,
+    this.collisionFriction = .26,
     this.wheelBase = 2.6,
     this.groundPlaneHeight = 0.0,
-    this.gripAtLowSpeed = 14.0,
-    this.gripAtHighSpeed = 4.0,
-    this.driftThresholdSpeed = 9.0,
     this.bodyHalfWidth = 0.9,
     this.bodyHalfLength = 2.2,
     this.collisionProbeHeight = 0.5,
@@ -47,6 +56,21 @@ class VehicleControllerComponent extends Component {
   /// Пассивное замедление накатом (без газа/тормоза), м/с².
   double drag;
   double mass, tyreFriction;
+  final double steeringResponse,
+      maxLateralAcceleration,
+      frontStiffness,
+      rearStiffness,
+      stabilityAssist,
+      driveBias,
+      rollCompliance,
+      pitchCompliance,
+      suspensionDamping,
+      restitution,
+      collisionFriction;
+  void Function(VehicleImpact impact)? onImpact;
+  VehicleContactBody? Function(Object? collider, vm.Vector3 point)? contactBody;
+  double _impactCooldown = 0;
+  double get yawInertia => mass * wheelBase * wheelBase * .40;
   final VehicleDynamics dynamics = VehicleDynamics();
   Node? sprungBody;
   List<Node> wheelNodes = const [];
@@ -76,6 +100,15 @@ class VehicleControllerComponent extends Component {
     }
   }
 
+  VehicleSweepHit? Function(
+    vm.Vector3 position,
+    vm.Vector3 displacement,
+    double oldHeading,
+    double newHeading,
+    double halfWidth,
+    double halfLength,
+  )?
+  extraHullSweep;
   bool _handbrake = false;
 
   /// Максимальный угол поворота колёс, рад.
@@ -90,15 +123,6 @@ class VehicleControllerComponent extends Component {
   double _terrainPitch = 0, _terrainRoll = 0;
   CharacterRaycaster? obstacleRaycast;
   void Function(vm.Vector3 position)? prepareObstacles;
-
-  /// Насколько быстро продольная скорость "прилипает" к направлению носа
-  /// машины на низкой/высокой скорости — ниже значение на высокой скорости
-  /// даёт занос в резких поворотах вместо мгновенного разворота вектора.
-  double gripAtLowSpeed;
-  double gripAtHighSpeed;
-
-  /// Скорость, начиная с которой сцепление начинает падать к gripAtHighSpeed.
-  double driftThresholdSpeed;
 
   /// Половина ширины/длины кузова — точки прощупывания препятствий по
   /// бамперу (3 луча: центр + оба края), чтобы ловить и лобовые, и угловые
@@ -141,7 +165,9 @@ class VehicleControllerComponent extends Component {
 
   /// Actual wheel angle, limited at speed to keep full touch input usable.
   double get steeringAngle {
-    final limit = math.atan(8.0 * wheelBase / math.max(1.0, speed * speed));
+    final limit = math.atan(
+      maxLateralAcceleration * wheelBase / math.max(1.0, speed * speed),
+    );
     return _steering * math.min(maxSteerAngle, limit);
   }
 
@@ -184,6 +210,43 @@ class VehicleControllerComponent extends Component {
     return false;
   }
 
+  void applyExternalImpulse(vm.Vector2 impulse, vm.Vector3 point) {
+    final p = node.globalTransform.getTranslation(),
+        r = vm.Vector2(point.x - p.x, point.z - p.z);
+    final delta = impulse / mass;
+    velocityXZ.add(delta);
+    dynamics.yawRate =
+        ((dynamics.yawRate + (r.y * impulse.x - r.x * impulse.y) / yawInertia))
+            .clamp(-2.5, 2.5);
+    final f = vm.Vector2(math.sin(heading), math.cos(heading));
+    dynamics.kickImpact(delta.dot(vm.Vector2(f.y, -f.x)), delta.dot(f));
+    final severity = delta.length;
+    if (severity > 1 && _impactCooldown <= 0) {
+      _impactCooldown = .12;
+      onCollision?.call(severity);
+      onImpact?.call(
+        VehicleImpact(
+          point: point,
+          normal: vm.Vector3(impulse.x, 0, impulse.y).normalized(),
+          closingSpeed: severity,
+          impulse: impulse.length,
+        ),
+      );
+    }
+  }
+
+  VehicleContactBody collisionBody(vm.Vector3 point) {
+    final p = node.globalTransform.getTranslation();
+    return VehicleContactBody(
+      mass: mass,
+      velocity: velocityXZ.clone(),
+      inertia: yawInertia,
+      yawRate: dynamics.yawRate,
+      arm: vm.Vector2(point.x - p.x, point.z - p.z),
+      applyImpulse: applyExternalImpulse,
+    );
+  }
+
   @override
   void update(double deltaSeconds) => fixedUpdate(deltaSeconds);
 
@@ -193,7 +256,10 @@ class VehicleControllerComponent extends Component {
     final dt = math.min(fixedDt, 0.05);
     if (dt <= 0.0 || !isAttached) return;
 
-    final steeringRate = _steerInput.abs() < _steering.abs() ? 8.0 : 5.0;
+    _impactCooldown = math.max(0, _impactCooldown - dt);
+    final steeringRate = _steerInput.abs() < _steering.abs()
+        ? 8.0
+        : steeringResponse / (1 + speed / 45);
     _steering +=
         (_steerInput - _steering) * (1.0 - math.exp(-steeringRate * dt));
 
@@ -215,6 +281,13 @@ class VehicleControllerComponent extends Component {
         braking: braking,
         drag: drag,
         tyreFriction: tyreFriction,
+        frontStiffness: frontStiffness,
+        rearStiffness: rearStiffness,
+        stabilityAssist: stabilityAssist,
+        driveBias: driveBias,
+        rollCompliance: rollCompliance,
+        pitchCompliance: pitchCompliance,
+        suspensionDamping: suspensionDamping,
       );
     }
     final newForward = vm.Vector2(math.sin(heading), math.cos(heading));
@@ -263,6 +336,22 @@ class VehicleControllerComponent extends Component {
       );
       var fraction = hit?.fraction ?? 1.0;
       var collisionNormal = hit?.normal;
+      var collisionPoint = hit?.point;
+      var collisionCollider = hit?.collider;
+      final extraHull = extraHullSweep?.call(
+        currentPos,
+        moveDelta,
+        previousHeading,
+        heading,
+        bodyHalfWidth,
+        bodyHalfLength,
+      );
+      if (extraHull != null && extraHull.fraction < fraction) {
+        fraction = extraHull.fraction;
+        collisionNormal = extraHull.normal;
+        collisionPoint = extraHull.point;
+        collisionCollider = extraHull.collider;
+      }
       if (moveDist > 1e-5) {
         final moveDir = moveDelta / moveDist;
         final movingForward =
@@ -279,26 +368,77 @@ class VehicleControllerComponent extends Component {
         if (extra != null && extra / moveDist < fraction) {
           fraction = ((extra - .05) / moveDist).clamp(0.0, 1.0);
           collisionNormal = null;
+          collisionCollider = null;
+          collisionPoint =
+              currentPos +
+              vm.Vector3(bumperCenter.x, collisionProbeHeight, bumperCenter.y) +
+              moveDir * extra;
         }
       }
       if (fraction < 1) {
         final normal = collisionNormal;
-        final n = normal == null ? null : vm.Vector2(normal.x, normal.z);
-        final into = n == null || n.length2 < .1
-            ? speed
-            : math.max(0.0, -velocityXZ.dot(n.normalized()));
-        onCollision?.call(into);
+        final n =
+            normal == null || normal.x * normal.x + normal.z * normal.z < .1
+            ? -velocityXZ.normalized()
+            : vm.Vector2(normal.x, normal.z).normalized();
+        final point =
+            collisionPoint ??
+            currentPos +
+                moveDelta * fraction +
+                vm.Vector3(
+                  newForward.x * bodyHalfLength,
+                  collisionProbeHeight,
+                  newForward.y * bodyHalfLength,
+                );
+        final impactRoot = currentPos + moveDelta * fraction;
+        final arm = vm.Vector2(point.x - impactRoot.x, point.z - impactRoot.z);
+        final target = contactBody?.call(collisionCollider, point);
+        final response = resolveVehicleImpact(
+          velocity: velocityXZ,
+          yawRate: dynamics.yawRate,
+          mass: mass,
+          inertia: yawInertia,
+          arm: arm,
+          normal: n,
+          otherMass: target?.mass ?? double.infinity,
+          otherVelocity: target?.velocity,
+          otherInertia: target?.inertia ?? double.infinity,
+          otherArm: target?.arm,
+          otherYawRate: target?.yawRate ?? 0,
+          restitution: restitution,
+          friction: collisionFriction,
+        );
+        final before = velocityXZ.clone();
+        velocityXZ.setFrom(response.velocity);
+        dynamics.yawRate = response.yawRate.clamp(-2.5, 2.5);
+        target?.applyImpulse(-response.impulse, point);
         moveDelta *= fraction;
         heading = previousHeading + (heading - previousHeading) * fraction;
-        if (n != null && n.length2 > .1) {
-          n.normalize();
-          final vn = velocityXZ.dot(n);
-          if (vn < 0) velocityXZ -= n * vn;
-          velocityXZ *= .78;
-        } else {
-          velocityXZ.setZero();
+        if (response.closingSpeed > 1 && _impactCooldown <= 0) {
+          _impactCooldown = .12;
+          onCollision?.call(response.closingSpeed);
+          final inverse = node.globalTransform.clone()..invert();
+          final shiftedPoint = point - (impactRoot - currentPos);
+          final local = inverse.transform3(shiftedPoint.clone());
+          final localNormal =
+              inverse.transform3(shiftedPoint + vm.Vector3(n.x, 0, n.y)) -
+              local;
+          onImpact?.call(
+            VehicleImpact(
+              point: point,
+              localPoint: local,
+              localNormal: localNormal,
+              normal: vm.Vector3(n.x, 0, n.y),
+              closingSpeed: response.closingSpeed,
+              impulse: response.impulse.length,
+            ),
+          );
+          final delta = velocityXZ - before;
+          dynamics.kickImpact(
+            delta.dot(vm.Vector2(newForward.y, -newForward.x)),
+            delta.dot(newForward),
+          );
         }
-        dynamics.stopYaw();
       }
     }
 
